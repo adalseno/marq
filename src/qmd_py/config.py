@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     rerank_model: str = "qwen3-reranker-0.6b-q8_0"
     generate_model: str = "qwen2.5-3b-instruct"
 
+    default_user_email: str = "local@qmd-py.local"
+    """Identifies the single mocked user (see auth.py). Created on first use."""
+
     @property
     def sqlalchemy_url(self) -> str:
         # Deliberately just our own schema, NOT `qmd_py,public`. TSVECTOR is

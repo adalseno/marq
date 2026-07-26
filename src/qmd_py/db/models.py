@@ -65,12 +65,18 @@ from sqlmodel import Field, SQLModel
 
 
 class User(SQLModel, table=True):
-    """Exactly one row for now (the mocked single-user case) - see auth.py."""
+    """Exactly one row for now (the mocked single-user case) - see auth.py.
+
+    `global_context` is the TS version's `context add /` ("applies to all
+    collections") - user-scoped here rather than a single system-wide KV
+    row, since in a real multi-user future each user reasonably wants their
+    own global context, not one shared by everyone."""
 
     id: int = Field(sa_column=Column(BigInteger, Identity(), primary_key=True))
     email: str = Field(unique=True, index=True)
     display_name: str | None = None
     is_admin: bool = False
+    global_context: str | None = None
     created_at: datetime = Field(
         sa_column=Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     )
@@ -80,7 +86,12 @@ class Collection(SQLModel, table=True):
     """Replaces the TS version's bare `documents.collection` TEXT tag with a
     real, owned entity - the prerequisite for per-collection ACL. `name` is
     scoped per-owner (UNIQUE(owner_user_id, name)), not globally unique like
-    the TS version's `store_collections.name` primary key."""
+    the TS version's `store_collections.name` primary key.
+
+    Per-path context text (the TS version's `context add <path> "text"`,
+    where `<path>` can be the collection root or a sub-path) lives in
+    `CollectionContext`, not as a single string field here - the TS model
+    supports many contexts per collection, keyed by path prefix."""
 
     __table_args__ = (UniqueConstraint("owner_user_id", "name"),)
 
@@ -94,7 +105,6 @@ class Collection(SQLModel, table=True):
     ignore_patterns: list[str] | None = Field(default=None, sa_column=Column(ARRAY(Text)))
     include_by_default: bool = True
     update_command: str | None = None
-    context: str | None = None
     created_at: datetime = Field(
         sa_column=Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     )
@@ -105,6 +115,24 @@ class Collection(SQLModel, table=True):
             onupdate=func.now(),
             nullable=False,
         )
+    )
+
+
+class CollectionContext(SQLModel, table=True):
+    """One row per (collection, path_prefix) context entry - `path_prefix`
+    is `""` for the collection root (`context add qmd://coll/` with no
+    sub-path), or a relative sub-path (`context add qmd://coll/notes`)."""
+
+    __table_args__ = (UniqueConstraint("collection_id", "path_prefix"),)
+
+    id: int = Field(sa_column=Column(BigInteger, Identity(), primary_key=True))
+    collection_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("collection.id"), index=True, nullable=False)
+    )
+    path_prefix: str = ""
+    context: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(
+        sa_column=Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     )
 
 
