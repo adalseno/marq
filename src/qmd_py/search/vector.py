@@ -91,6 +91,23 @@ async def _pgvector_schema(session: AsyncSession) -> str:
     return str(schema)
 
 
+async def get_or_probe_dimension(
+    session: AsyncSession, llm_client: LlmClient, model_slug: str
+) -> int:
+    """The registered dimension for an already-known model, or one
+    embedding call to discover it for a brand-new one - avoids wasting a
+    probe request every time `embed` runs against a model already in use."""
+    existing = (
+        await session.execute(
+            select(col(EmbeddingModel.dimension)).where(col(EmbeddingModel.slug) == model_slug)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    probe = await llm_client.embed(["dimension probe"], model_slug)
+    return len(probe[0])
+
+
 async def ensure_embedding_model(
     session: AsyncSession, slug: str, role: str, dimension: int
 ) -> EmbeddingModel:
@@ -315,3 +332,30 @@ async def search_vec(
             )
         )
     return results
+
+
+async def cleanup_orphaned_embeddings(session: AsyncSession) -> int:
+    """Deletes embedding rows whose hash no longer belongs to any active
+    document, across every registered embedding model's table - backs the
+    `cleanup` command's "remove orphaned embedding chunks" step. Content
+    rows themselves are `cleanup_orphaned_content`'s job (store.py)."""
+    model_slugs = (
+        await session.execute(select(col(EmbeddingModel.slug)))
+    ).scalars().all()
+
+    total = 0
+    for slug in model_slugs:
+        table_name = embeddings_table_name(slug)
+        if not await _embeddings_table_exists(session, table_name):
+            continue
+        result = await session.execute(
+            text(
+                f"""
+                DELETE FROM {table_name}
+                WHERE hash NOT IN (SELECT hash FROM document WHERE active)
+                """
+            )
+        )
+        total += result.rowcount or 0  # type: ignore[attr-defined]
+    await session.flush()
+    return total

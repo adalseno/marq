@@ -108,6 +108,25 @@ async def test_context_add_list_remove(session: AsyncSession, user: CurrentUser)
 
 
 @pytest.mark.integration
+async def test_remove_collection_with_context_still_set(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """Regression test: removing a collection that still has a per-path
+    context row must not raise a raw FK violation - collectioncontext's
+    collection_id FK has no ON DELETE CASCADE, so remove_collection must
+    delete context rows itself before deleting the collection."""
+    await add_collection(session, user, "coll-with-ctx", "/tmp/coll-with-ctx")
+    await session.commit()
+    await add_context(session, user, "coll-with-ctx", "", "root context")
+    await session.commit()
+
+    result = await remove_collection(session, user, "coll-with-ctx")
+    await session.commit()
+    assert result.deleted_docs == 0
+    assert await list_collections(session, user) == []
+
+
+@pytest.mark.integration
 async def test_set_global_context(session: AsyncSession, user: CurrentUser) -> None:
     await set_global_context(session, user, "always include this")
     await session.commit()

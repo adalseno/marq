@@ -10,10 +10,12 @@ mocked to always allow today, but the choke point is real from day one.
 """
 
 import fnmatch
+import glob as glob_module
 import hashlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -21,7 +23,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from qmd_py.auth import CurrentUser, can_access
-from qmd_py.db.models import Collection, CollectionContext, Content, Document, User
+from qmd_py.db.models import (
+    Collection,
+    CollectionContext,
+    CollectionGrant,
+    Content,
+    Document,
+    LlmCache,
+    User,
+)
 from qmd_py.search._acl import resolve_collection_ids
 from qmd_py.search.fts import get_context_for_path, get_docid, update_document_search_vector
 from qmd_py.vpath import is_virtual_path, parse_virtual_path
@@ -122,9 +132,21 @@ class RemoveCollectionResult:
 async def remove_collection(
     session: AsyncSession, user: CurrentUser, name: str
 ) -> RemoveCollectionResult:
+    """Deletes the collection's contexts and grants before the collection
+    row itself - `collectioncontext_collection_id_fkey`/
+    `collectiongrant_collection_id_fkey` have no `ON DELETE CASCADE`, so
+    Postgres blocks the collection delete while either still references it
+    (caught live: removing a collection with any per-path context still
+    set raised a raw FK violation instead of succeeding)."""
     collection = await _resolve_owned_collection(session, user, name, "admin")
     deleted = await session.execute(
         delete(Document).where(col(Document.collection_id) == collection.id)
+    )
+    await session.execute(
+        delete(CollectionContext).where(col(CollectionContext.collection_id) == collection.id)
+    )
+    await session.execute(
+        delete(CollectionGrant).where(col(CollectionGrant.collection_id) == collection.id)
     )
     await session.delete(collection)
     await session.flush()
@@ -140,6 +162,28 @@ async def rename_collection(
 ) -> None:
     collection = await _resolve_owned_collection(session, user, old_name, "admin")
     collection.name = new_name
+    session.add(collection)
+    await session.flush()
+
+
+async def get_collection(session: AsyncSession, user: CurrentUser, name: str) -> Collection:
+    return await _resolve_owned_collection(session, user, name, "read")
+
+
+async def set_update_command(
+    session: AsyncSession, user: CurrentUser, name: str, command: str | None
+) -> None:
+    collection = await _resolve_owned_collection(session, user, name, "admin")
+    collection.update_command = command
+    session.add(collection)
+    await session.flush()
+
+
+async def set_include_by_default(
+    session: AsyncSession, user: CurrentUser, name: str, include: bool
+) -> None:
+    collection = await _resolve_owned_collection(session, user, name, "admin")
+    collection.include_by_default = include
     session.add(collection)
     await session.flush()
 
@@ -213,6 +257,11 @@ async def set_global_context(session: AsyncSession, user: CurrentUser, text: str
     user_row.global_context = text
     session.add(user_row)
     await session.flush()
+
+
+async def get_global_context(session: AsyncSession, user: CurrentUser) -> str | None:
+    result = await session.execute(select(col(User.global_context)).where(col(User.id) == user.id))
+    return result.scalar_one_or_none()
 
 
 @dataclass
@@ -345,6 +394,21 @@ async def find_active_document(
     return result.scalar_one_or_none()
 
 
+async def find_document_by_path(
+    session: AsyncSession, collection_id: int, path: str
+) -> Document | None:
+    """Active or not - `reindex_collection` needs this (not
+    `find_active_document`) to reactivate a deactivated document whose
+    file reappears, rather than violating `Document`'s table-wide
+    `UNIQUE(collection_id, path)` constraint by inserting a second row."""
+    result = await session.execute(
+        select(Document).where(
+            col(Document.collection_id) == collection_id, col(Document.path) == path
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 async def insert_document(
     session: AsyncSession,
     collection_id: int,
@@ -371,9 +435,19 @@ async def insert_document(
 async def update_document(
     session: AsyncSession, document: Document, title: str, hash_: str, modified_at: datetime
 ) -> None:
+    """Also reactivates the document (`active=True`) unconditionally: every
+    caller reaches this because a real file on disk currently maps to this
+    (collection_id, path), including a file that reappeared after having
+    been deactivated (e.g. switching git branches back and forth over the
+    same indexed working tree) - `Document` has a table-wide
+    `UNIQUE(collection_id, path)` constraint with no partial/active
+    condition, so there can only ever be one row for a path regardless of
+    active status; reactivating it is the only option, `INSERT`ing a
+    second row isn't."""
     document.title = title
     document.hash = hash_
     document.modified_at = modified_at
+    document.active = True
     session.add(document)
     await session.flush()
     await update_document_search_vector(session, document.id)
@@ -398,10 +472,18 @@ async def get_active_document_paths(session: AsyncSession, collection_id: int) -
 
 
 async def cleanup_orphaned_content(session: AsyncSession) -> int:
+    """A hash is only truly orphaned once NO document row - active or
+    inactive - references it: `document.hash` is a NOT NULL FK with no
+    `ON DELETE CASCADE`, so Postgres blocks deleting a content row an
+    *inactive* document still points to, even though search/retrieval
+    never reads inactive documents. Filtering this query to only active
+    documents (as an earlier version did) raised a FK violation the first
+    time an inactive document was the last remaining reference. Run
+    `delete_inactive_documents` first (see the `cleanup` command) to
+    actually reclaim content orphaned only by now-abandoned inactive
+    rows."""
     result = await session.execute(
-        delete(Content).where(
-            ~col(Content.hash).in_(select(col(Document.hash)).where(col(Document.active)))
-        )
+        delete(Content).where(~col(Content.hash).in_(select(col(Document.hash))))
     )
     await session.flush()
     return result.rowcount or 0  # type: ignore[attr-defined]
@@ -409,6 +491,157 @@ async def cleanup_orphaned_content(session: AsyncSession) -> int:
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+# =============================================================================
+# Indexing (`update` / `collection add`) - port of the TS reference's
+# reindexCollection (src/store.ts). Deliberately omits the legacy
+# handelize()/case-insensitive-path migration lookup (findOrMigrateLegacyDocument)
+# - see the module docstring's earlier note; that only existed to migrate very
+# old SQLite indexes, which doesn't apply to a from-scratch project.
+# =============================================================================
+
+_EXCLUDE_DIRS = frozenset({"node_modules", ".git", ".cache", "vendor", "dist", "build"})
+
+
+def _expand_braces(pattern: str) -> list[str]:
+    """Expands one `{a,b,c}` alternation group - Python's glob has no
+    brace-expansion support (that's a shell feature), but our collection
+    patterns (e.g. `**/*.{py,md,json}`) need it."""
+    match = re.search(r"\{([^{}]+)\}", pattern)
+    if not match:
+        return [pattern]
+    prefix, suffix = pattern[: match.start()], pattern[match.end() :]
+    return [prefix + alt + suffix for alt in match.group(1).split(",")]
+
+
+def _discover_files(
+    collection_path: str, pattern: str, ignore_patterns: list[str] | None
+) -> list[str]:
+    """Relative paths (glob-matched, hidden-file/dir and _EXCLUDE_DIRS
+    filtered) under `collection_path` - port of reindexCollection's
+    fast-glob call + hidden-file filter."""
+    root = Path(collection_path)
+    seen: set[str] = set()
+    files: list[str] = []
+    for expanded in _expand_braces(pattern):
+        for match in glob_module.glob(
+            expanded, root_dir=str(root), recursive=True, include_hidden=False
+        ):
+            rel_path = match
+            if rel_path in seen:
+                continue
+            parts = rel_path.split("/")
+            if any(p in _EXCLUDE_DIRS or p.startswith(".") for p in parts):
+                continue
+            if ignore_patterns and any(fnmatch.fnmatch(rel_path, ip) for ip in ignore_patterns):
+                continue
+            if not (root / rel_path).is_file():
+                continue
+            seen.add(rel_path)
+            files.append(rel_path)
+    return sorted(files)
+
+
+@dataclass
+class ReindexResult:
+    indexed: int
+    updated: int
+    unchanged: int
+    removed: int
+    orphaned_cleaned: int
+
+
+async def reindex_collection(
+    session: AsyncSession, user: CurrentUser, name: str
+) -> ReindexResult:
+    """Walk a collection's filesystem path, syncing `document`/`content`
+    to match what's on disk - backs `collection add` and `update`.
+
+    Simplification vs. the TS reference: a title-only change (same
+    content hash) is counted as "updated" here rather than its own
+    separate `updated`-for-title-only bucket - these are just informational
+    summary counts shown to the user, not load-bearing for correctness.
+    """
+    collection = await _resolve_owned_collection(session, user, name, "write")
+    files = _discover_files(collection.path, collection.pattern, collection.ignore_patterns)
+    root = Path(collection.path)
+    indexed = 0
+    updated = 0
+    unchanged = 0
+    seen_paths: set[str] = set()
+
+    for rel_path in files:
+        filepath = root / rel_path
+        try:
+            content = filepath.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if not content.strip():
+            continue
+        seen_paths.add(rel_path)
+
+        digest = await hash_content(content)
+        title = extract_title(content, rel_path)
+        modified_at = datetime.fromtimestamp(filepath.stat().st_mtime, tz=UTC)
+
+        existing = await find_document_by_path(session, collection.id, rel_path)
+        if existing is not None:
+            if existing.active and existing.hash == digest and existing.title == title:
+                unchanged += 1
+                continue
+            if existing.hash != digest:
+                await insert_content(session, digest, content)
+            await update_document(session, existing, title, digest, modified_at)
+            updated += 1
+        else:
+            await insert_content(session, digest, content)
+            await insert_document(
+                session, collection.id, rel_path, title, digest, modified_at, modified_at
+            )
+            indexed += 1
+
+    removed = 0
+    for active_path in await get_active_document_paths(session, collection.id):
+        if active_path not in seen_paths:
+            await deactivate_document(session, collection.id, active_path)
+            removed += 1
+
+    orphaned = await cleanup_orphaned_content(session)
+
+    return ReindexResult(
+        indexed=indexed,
+        updated=updated,
+        unchanged=unchanged,
+        removed=removed,
+        orphaned_cleaned=orphaned,
+    )
+
+
+# =============================================================================
+# Cleanup (`cleanup` command)
+# =============================================================================
+
+
+async def delete_llm_cache(session: AsyncSession) -> int:
+    result = await session.execute(delete(LlmCache))
+    await session.flush()
+    return result.rowcount or 0  # type: ignore[attr-defined]
+
+
+async def delete_inactive_documents(session: AsyncSession, user: CurrentUser) -> int:
+    """Hard-deletes deactivated document rows (not their content - that's
+    `cleanup_orphaned_content`'s job) for every collection `user` owns."""
+    collection_ids = await resolve_collection_ids(session, user, None)
+    if not collection_ids:
+        return 0
+    result = await session.execute(
+        delete(Document).where(
+            col(Document.collection_id).in_(collection_ids), ~col(Document.active)
+        )
+    )
+    await session.flush()
+    return result.rowcount or 0  # type: ignore[attr-defined]
 
 
 def add_line_numbers(text: str, start_line: int = 1) -> str:
