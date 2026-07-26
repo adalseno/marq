@@ -19,5 +19,36 @@ services:
       timeout: 3s
       retries: 20
 
+  # Optional local llama.cpp router, mirroring ubuserver.internal's own
+  # Quadlet setup (~/.config/containers/systemd/llama-cpp.container) - pure
+  # convenience, not started by default (`podman-compose --profile llm up`).
+  # See llm-stack/README.md for GGUF file setup.
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    profiles: ["llm"]
+    ports:
+      - "8099:8099"
+    volumes:
+      - ./llm-stack/models:/models:Z
+    devices:
+      - /dev/dri
+    command: >
+      --models-dir /models/
+      --models-max 3
+      --models-preset /models/preset.ini
+      --host 0.0.0.0
+      --port 8099
+      --ctx-size 4096
+      --parallel 1
+      --gpu-layers 99
+      --flash-attn auto
+      --threads 8
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8099/health -o /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
 volumes:
   qmd-py-pgdata:
