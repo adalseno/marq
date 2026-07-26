@@ -6,9 +6,10 @@ since those templates must match exactly for embeddings to be comparable
 to the TS reference's.
 """
 
+import json
 import re
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 
 import httpx
 
@@ -37,8 +38,8 @@ def format_doc_for_embedding(text: str, title: str | None, model: str) -> str:
 
 class LlmClient:
     """Thin wrapper over the router's OpenAI-compatible `/v1/embeddings`,
-    `/tokenize`, and `/detokenize` endpoints. `/v1/chat/completions` and
-    `/rerank` are added in Phase 8 when query expansion/reranking land."""
+    `/v1/chat/completions`, `/rerank`, `/tokenize`, and `/detokenize`
+    endpoints."""
 
     def __init__(self, base_url: str, timeout: float = 120.0) -> None:
         self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout)
@@ -50,6 +51,46 @@ class LlmClient:
         response.raise_for_status()
         data = response.json()["data"]
         return [item["embedding"] for item in sorted(data, key=lambda d: d["index"])]
+
+    async def chat_json(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        json_schema: dict[str, Any],
+        max_tokens: int = 300,
+        temperature: float = 0.7,
+    ) -> dict[str, Any]:
+        """One chat completion constrained to `json_schema` via the
+        router's `response_format` (an OpenAI-compatible, increasingly
+        standard llama.cpp server feature) - returns the parsed JSON
+        object. Used for query expansion (see search/hybrid.py)."""
+        response = await self._client.post(
+            "/v1/chat/completions",
+            json={
+                "model": model,
+                "messages": messages,
+                "response_format": {"type": "json_schema", "json_schema": json_schema},
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+        )
+        response.raise_for_status()
+        content: dict[str, Any] = json.loads(response.json()["choices"][0]["message"]["content"])
+        return content
+
+    async def rerank(self, query: str, documents: list[str], model: str) -> list[float]:
+        """Relevance scores in the same order as `documents` - the
+        router's response is keyed by `index` rather than guaranteed to
+        preserve input order, so results are re-sorted into place here."""
+        response = await self._client.post(
+            "/rerank", json={"model": model, "query": query, "documents": documents}
+        )
+        response.raise_for_status()
+        results = response.json()["results"]
+        scores = [0.0] * len(documents)
+        for r in results:
+            scores[r["index"]] = r["relevance_score"]
+        return scores
 
     async def tokenize(self, text: str, model: str) -> list[int]:
         response = await self._client.post("/tokenize", json={"model": model, "content": text})

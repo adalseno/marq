@@ -6,6 +6,7 @@ adds the MCP server, Phase 10 adds bench/doctor/skill.
 
 import click
 
+from qmd_py.cli.commands.query import query_command
 from qmd_py.cli.commands.read import (
     get_command,
     ls_command,
@@ -31,6 +32,8 @@ def cli() -> None:
 
 cli.add_command(search_command)
 cli.add_command(vsearch_command)
+cli.add_command(query_command)
+cli.add_command(query_command, name="deep-search")
 cli.add_command(get_command)
 cli.add_command(multi_get_command)
 cli.add_command(ls_command)

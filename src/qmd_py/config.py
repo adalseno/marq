@@ -26,7 +26,11 @@ class Settings(BaseSettings):
 
     embed_model: str = "bge-m3-q8_0"
     rerank_model: str = "qwen3-reranker-0.6b-q8_0"
-    generate_model: str = "qwen2.5-3b-instruct"
+    # Matches the real preset id on the router (llm-stack/models/preset.ini) -
+    # "qwen2.5-3b-instruct" alone (no quantization suffix) isn't a valid
+    # model id there; caught live when Phase 8's query expansion first
+    # exercised this setting and got a "model not found" error.
+    generate_model: str = "qwen2.5-3b-instruct-q4_k_m"
 
     default_user_email: str = "local@qmd-py.local"
     """Identifies the single mocked user (see auth.py). Created on first use."""
