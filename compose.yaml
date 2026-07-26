@@ -1,0 +1,23 @@
+# Local dev/test Postgres - pinned to pg16 to match the ubuserver.internal
+# production instance exactly (PostgreSQL 16.14). Day-to-day iteration and
+# the pytest suite point here; each phase's final live-parity check still
+# runs against the real server before the phase is considered done.
+services:
+  postgres:
+    image: docker.io/pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: qmd
+      POSTGRES_PASSWORD: qmd
+      POSTGRES_DB: qmd
+    ports:
+      - "5433:5432"
+    volumes:
+      - qmd-py-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qmd -d qmd"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  qmd-py-pgdata:
