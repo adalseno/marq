@@ -21,6 +21,7 @@ from sqlmodel import col
 
 from qmd_py.auth import CurrentUser, can_access
 from qmd_py.db.models import Collection, CollectionContext, Content, Document, User
+from qmd_py.search.fts import update_document_search_vector
 
 
 class CollectionNotFoundError(Exception):
@@ -360,6 +361,7 @@ async def insert_document(
     )
     session.add(document)
     await session.flush()
+    await update_document_search_vector(session, document.id)
     return document
 
 
@@ -371,6 +373,7 @@ async def update_document(
     document.modified_at = modified_at
     session.add(document)
     await session.flush()
+    await update_document_search_vector(session, document.id)
 
 
 async def deactivate_document(session: AsyncSession, collection_id: int, path: str) -> None:
