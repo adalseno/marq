@@ -10,6 +10,7 @@ The schema is dropped at teardown regardless of test outcome.
 
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 from urllib.parse import quote
 
 import pytest_asyncio
@@ -24,9 +25,32 @@ from sqlmodel import SQLModel
 
 from qmd_py.auth import CurrentUser, get_current_user
 from qmd_py.config import get_settings
+from qmd_py.db.models import Collection
+from qmd_py.store import (
+    add_collection,
+    extract_title,
+    hash_content,
+    insert_content,
+    insert_document,
+    utcnow,
+)
+
+FIXTURE_COLLECTION_PATH = Path(__file__).parent / "fixtures" / "sample-collection"
+FIXTURE_COLLECTION_EXTS = {".md", ".py", ".js", ".ts"}
 
 
 def _schema_url(schema: str) -> str:
+    # Single-entry search_path, deliberately - see config.py's
+    # sqlalchemy_url for why a multi-entry search_path is dangerous here:
+    # Postgres's "is this object visible" check (used by both
+    # pg_table_is_visible() for Alembic and CREATE TABLE IF NOT EXISTS)
+    # considers a name visible if ANY search_path entry resolves to it. A
+    # first attempt at fixing pgvector's `vector` type visibility (below)
+    # by adding the app's `qmd_py` schema to this search_path caused every
+    # ordinary SQLModel table's `CREATE TABLE IF NOT EXISTS` to silently
+    # no-op (already visible in qmd_py) and all test data to leak into the
+    # live app schema instead of this isolated one - see
+    # search/vector.py's `_pgvector_schema` for the real, narrow fix.
     base_url = get_settings().postgres_url
     options = quote(f"-c search_path={schema}")
     separator = "&" if "?" in base_url else "?"
@@ -43,6 +67,11 @@ async def engine() -> AsyncIterator[AsyncEngine]:
 
     test_engine = create_async_engine(_schema_url(schema))
     async with test_engine.begin() as conn:
+        # Extension objects (e.g. pgvector's `vector` type) live in whatever
+        # schema was on the search_path when CREATE EXTENSION ran - the
+        # `qmd_py` schema's copy isn't visible from this fresh test schema.
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.run_sync(SQLModel.metadata.create_all)
 
     yield test_engine
@@ -64,3 +93,27 @@ async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 @pytest_asyncio.fixture
 async def user(session: AsyncSession) -> CurrentUser:
     return await get_current_user(session)
+
+
+@pytest_asyncio.fixture
+async def sample_collection(session: AsyncSession, user: CurrentUser) -> Collection:
+    """Indexes `tests/fixtures/sample-collection/` - a small, frozen,
+    checked-in multi-language project (.md/.py/.js/.ts) - into a real
+    collection. A manageable, always-available stand-in for the external
+    book-catalog fixture used during development (which isn't checked into
+    the repo and needs SSH access to reindex), so anyone can run realistic
+    multi-file FTS/vector search tests without either."""
+    collection = await add_collection(
+        session, user, "sample", str(FIXTURE_COLLECTION_PATH), "**/*.{md,py,js,ts}"
+    )
+    for filepath in sorted(FIXTURE_COLLECTION_PATH.rglob("*")):
+        if not filepath.is_file() or filepath.suffix not in FIXTURE_COLLECTION_EXTS:
+            continue
+        rel_path = str(filepath.relative_to(FIXTURE_COLLECTION_PATH))
+        content = filepath.read_text(encoding="utf-8")
+        digest = await hash_content(content)
+        title = extract_title(content, rel_path)
+        await insert_content(session, digest, content)
+        await insert_document(session, collection.id, rel_path, title, digest, utcnow(), utcnow())
+    await session.commit()
+    return collection

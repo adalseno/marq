@@ -1,0 +1,27 @@
+"""Shared collection/ACL resolution for the search submodule (fts.py,
+vector.py). Deliberately does not import from `store.py` - see fts.py's
+module docstring for why (store.py depends on this package, so this
+package must not depend back on store.py).
+"""
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
+
+from qmd_py.auth import CurrentUser, can_access
+from qmd_py.db.models import Collection
+
+
+async def resolve_collection_ids(
+    session: AsyncSession, user: CurrentUser, collection_name: str | None
+) -> list[int]:
+    """Collection ids `user` can read, optionally narrowed to one name. No
+    name match / no accessible collections -> empty list (callers should
+    treat that as "no results", not an error - matches the TS reference's
+    searchFTS/searchVec, which never validate the collection filter, they
+    just produce zero matching rows)."""
+    result = await session.execute(select(Collection).order_by(col(Collection.name)))
+    collections = [c for c in result.scalars() if await can_access(user, c, "read")]
+    if collection_name is not None:
+        collections = [c for c in collections if c.name == collection_name]
+    return [c.id for c in collections]

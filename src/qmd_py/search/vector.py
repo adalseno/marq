@@ -1,0 +1,308 @@
+"""Vector search: pgvector embeddings, one physical table per embedding
+model (`embeddings_<slug>`), created dynamically once a model's dimension
+is known - fixes the TS reference's one-model-at-a-time limitation (a
+single `content_vectors.embedding` column, destructively dropped on a
+model switch). Candidate retrieval happens in a CTE via the HNSW-indexed
+`<=>` operator, exactly as the TS reference's `searchVec` does; the
+collection filter is applied only on the outer join, never inside the
+CTE, since `ORDER BY distance LIMIT n` is the only access pattern that
+uses the ANN index.
+"""
+
+import re
+from dataclasses import dataclass
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col, select
+
+from qmd_py.auth import CurrentUser
+from qmd_py.db.models import Collection, EmbeddingModel
+from qmd_py.llm.client import LlmClient, format_doc_for_embedding, format_query_for_embedding
+from qmd_py.search._acl import resolve_collection_ids
+from qmd_py.search.fts import SearchResult, get_context_for_path, get_docid
+
+# Chunking: 900 tokens/chunk, 15% overlap - fixed character-window
+# slicing with a conservative chars-per-token estimate. This is a
+# SIMPLIFICATION of the TS reference's chunkDocumentByTokens (no smart
+# heading/AST break-point search, no tokenizer-verified re-splitting):
+# good enough for vsearch's mechanics (Phase 5's scope - candidate CTE,
+# dedup, HNSW). Revisit for exact chunk-boundary parity when Phase 8's
+# bench/quality work needs it.
+CHUNK_SIZE_TOKENS = 900
+CHUNK_OVERLAP_TOKENS = int(CHUNK_SIZE_TOKENS * 0.15)
+_AVG_CHARS_PER_TOKEN = 3
+
+
+def chunk_document(body: str) -> list[tuple[str, int]]:
+    max_chars = CHUNK_SIZE_TOKENS * _AVG_CHARS_PER_TOKEN
+    overlap_chars = CHUNK_OVERLAP_TOKENS * _AVG_CHARS_PER_TOKEN
+
+    if len(body) <= max_chars:
+        return [(body, 0)]
+
+    chunks: list[tuple[str, int]] = []
+    step = max_chars - overlap_chars
+    pos = 0
+    while pos < len(body):
+        chunks.append((body[pos : pos + max_chars], pos))
+        if pos + max_chars >= len(body):
+            break
+        pos += step
+    return chunks
+
+
+_SLUG_SANITIZE = re.compile(r"[^a-z0-9_]+")
+
+
+def embeddings_table_name(model_slug: str) -> str:
+    sanitized = _SLUG_SANITIZE.sub("_", model_slug.lower()).strip("_")
+    return f"embeddings_{sanitized}"
+
+
+async def _pgvector_schema(session: AsyncSession) -> str:
+    """Schema pgvector's `vector` type/opclasses actually live in - looked
+    up from `pg_extension` rather than assumed to be the app's own
+    configured schema. On a fresh database, Alembic's `CREATE EXTENSION IF
+    NOT EXISTS vector` does install it there - but on a shared database
+    (e.g. this project's real server, which already had another service
+    install pgvector into `public` long before qmd-py existed), extensions
+    are database-wide singletons: Alembic's call just found it already
+    installed elsewhere and no-opped. See `ensure_embedding_model` for why
+    every reference to the type/opclasses is schema-qualified rather than
+    relying on search_path.
+    """
+    result = await session.execute(
+        text(
+            "SELECT n.nspname FROM pg_extension e "
+            "JOIN pg_namespace n ON n.oid = e.extnamespace "
+            "WHERE e.extname = 'vector'"
+        )
+    )
+    schema = result.scalar_one_or_none()
+    if schema is None:
+        raise RuntimeError("pgvector extension ('vector') is not installed in this database")
+    return str(schema)
+
+
+async def ensure_embedding_model(
+    session: AsyncSession, slug: str, role: str, dimension: int
+) -> EmbeddingModel:
+    """Registers (or fetches) an embedding-model row and creates its
+    dedicated `embeddings_<slug>` table - idempotent, never destructive;
+    switching models means a different table, never a dropped column."""
+    existing = (
+        await session.execute(select(EmbeddingModel).where(col(EmbeddingModel.slug) == slug))
+    ).scalar_one_or_none()
+    if existing is None:
+        existing = EmbeddingModel(slug=slug, role=role, dimension=dimension)
+        session.add(existing)
+        await session.flush()
+
+    table_name = embeddings_table_name(slug)
+    # pgvector's `vector` type/opclasses are database-wide singletons,
+    # installed into whichever schema actually created the extension (see
+    # `_pgvector_schema`) - schema-qualified here so they resolve correctly
+    # even from a connection whose search_path is some *other* schema
+    # entirely (e.g. a test harness's isolated scratch schema), without
+    # needing that schema on the search_path at all (see tests/conftest.py's
+    # `_schema_url` for why that's dangerous: it would make CREATE TABLE IF
+    # NOT EXISTS treat this app's own tables as already existing there too,
+    # and silently leak test data into it).
+    pgvector_schema = await _pgvector_schema(session)
+    await session.execute(
+        text(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                hash TEXT NOT NULL REFERENCES content(hash) ON DELETE CASCADE,
+                seq INTEGER NOT NULL DEFAULT 0,
+                pos INTEGER NOT NULL DEFAULT 0,
+                total_chunks INTEGER NOT NULL DEFAULT 1,
+                embedded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                embedding {pgvector_schema}.vector({dimension}) NOT NULL,
+                PRIMARY KEY (hash, seq)
+            )
+            """
+        )
+    )
+    await session.execute(
+        text(
+            f"CREATE INDEX IF NOT EXISTS idx_{table_name}_embedding "
+            f"ON {table_name} USING hnsw (embedding {pgvector_schema}.vector_cosine_ops)"
+        )
+    )
+    return existing
+
+
+def _to_vector_literal(embedding: list[float]) -> str:
+    return "[" + ",".join(repr(float(v)) for v in embedding) + "]"
+
+
+@dataclass
+class EmbedResult:
+    docs_processed: int
+    chunks_embedded: int
+
+
+async def embed_pending_documents(
+    session: AsyncSession,
+    user: CurrentUser,
+    llm_client: LlmClient,
+    model_slug: str,
+    dimension: int,
+    collection_name: str | None = None,
+) -> EmbedResult:
+    """Embed every active document not yet present in `embeddings_<slug>`.
+
+    MVP: no batching/retry/duration-cap/force-re-embed - see Phase 7's
+    `embed` CLI command for the production version of this.
+    """
+    await ensure_embedding_model(session, model_slug, "embed", dimension)
+    table_name = embeddings_table_name(model_slug)
+
+    collection_ids = await resolve_collection_ids(session, user, collection_name)
+    if not collection_ids:
+        return EmbedResult(0, 0)
+
+    pending = (
+        await session.execute(
+            text(
+                f"""
+                SELECT DISTINCT d.hash, c.doc AS body, d.title
+                FROM document d
+                JOIN content c ON c.hash = d.hash
+                WHERE d.active AND d.collection_id = ANY(:collection_ids)
+                  AND d.hash NOT IN (SELECT hash FROM {table_name})
+                """
+            ),
+            {"collection_ids": collection_ids},
+        )
+    ).all()
+
+    docs_processed = 0
+    chunks_embedded = 0
+    for row in pending:
+        chunks = chunk_document(row.body)
+        texts_to_embed = [
+            format_doc_for_embedding(chunk_text, row.title, model_slug)
+            for chunk_text, _ in chunks
+        ]
+        vectors = await llm_client.embed(texts_to_embed, model_slug)
+
+        pgvector_schema = await _pgvector_schema(session)
+        for seq, ((_, pos), vector) in enumerate(zip(chunks, vectors, strict=True)):
+            await session.execute(
+                text(
+                    f"""
+                    INSERT INTO {table_name} (hash, seq, pos, total_chunks, embedding)
+                    VALUES (:hash, :seq, :pos, :total_chunks, (:vec)::{pgvector_schema}.vector)
+                    ON CONFLICT (hash, seq) DO UPDATE SET
+                        pos = excluded.pos, total_chunks = excluded.total_chunks,
+                        embedding = excluded.embedding, embedded_at = now()
+                    """
+                ),
+                {
+                    "hash": row.hash,
+                    "seq": seq,
+                    "pos": pos,
+                    "total_chunks": len(chunks),
+                    "vec": _to_vector_literal(vector),
+                },
+            )
+            chunks_embedded += 1
+        docs_processed += 1
+
+    return EmbedResult(docs_processed, chunks_embedded)
+
+
+async def search_vec(
+    session: AsyncSession,
+    user: CurrentUser,
+    query: str,
+    llm_client: LlmClient,
+    model_slug: str,
+    limit: int = 20,
+    collection_name: str | None = None,
+) -> list[SearchResult]:
+    collection_ids = await resolve_collection_ids(session, user, collection_name)
+    if not collection_ids:
+        return []
+
+    table_name = embeddings_table_name(model_slug)
+    pgvector_schema = await _pgvector_schema(session)
+    formatted_query = format_query_for_embedding(query, model_slug)
+    embedding = (await llm_client.embed([formatted_query], model_slug))[0]
+
+    rows = (
+        await session.execute(
+            text(
+                f"""
+                WITH candidates AS (
+                    SELECT hash, seq, pos,
+                        embedding OPERATOR({pgvector_schema}.<=>) (:vec)::{pgvector_schema}.vector
+                            AS distance
+                    FROM {table_name}
+                    ORDER BY distance ASC
+                    LIMIT :candidate_limit
+                )
+                SELECT
+                    c.hash, c.pos, c.distance,
+                    d.collection_id, d.path, d.title, d.modified_at,
+                    doc.doc AS body
+                FROM candidates c
+                JOIN document d ON d.hash = c.hash AND d.active
+                JOIN content doc ON doc.hash = d.hash
+                WHERE d.collection_id = ANY(:collection_ids)
+                """
+            ),
+            {
+                "vec": _to_vector_literal(embedding),
+                # limit*3 candidate pool mirrors the TS reference - the
+                # only access pattern that uses the HNSW index.
+                "candidate_limit": limit * 3,
+                "collection_ids": collection_ids,
+            },
+        )
+    ).all()
+    if not rows:
+        return []
+
+    # Multiple chunks of the same file can appear - dedupe by
+    # (collection_id, path), keeping the closest (lowest-distance) chunk.
+    best: dict[tuple[int, str], Any] = {}
+    for row in rows:
+        key = (row.collection_id, row.path)
+        if key not in best or row.distance < best[key].distance:
+            best[key] = row
+
+    ranked = sorted(best.values(), key=lambda r: r.distance)[:limit]
+
+    names_result = await session.execute(
+        select(col(Collection.id), col(Collection.name)).where(
+            col(Collection.id).in_({r.collection_id for r in ranked})
+        )
+    )
+    collection_names: dict[int, str] = {row.id: row.name for row in names_result}
+
+    results = []
+    for row in ranked:
+        name = collection_names[row.collection_id]
+        context = await get_context_for_path(session, user, row.collection_id, row.path)
+        results.append(
+            SearchResult(
+                filepath=f"qmd://{name}/{row.path}",
+                display_path=f"{name}/{row.path}",
+                title=row.title,
+                hash=row.hash,
+                docid=get_docid(row.hash),
+                collection_name=name,
+                modified_at=row.modified_at,
+                body_length=len(row.body),
+                body=row.body,
+                context=context,
+                score=1 - row.distance,
+                source="vec",
+            )
+        )
+    return results

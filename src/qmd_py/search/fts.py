@@ -20,8 +20,9 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from qmd_py.auth import CurrentUser, can_access
+from qmd_py.auth import CurrentUser
 from qmd_py.db.models import Collection, CollectionContext, Content, Document, User
+from qmd_py.search._acl import resolve_collection_ids
 
 # =============================================================================
 # CJK handling
@@ -322,16 +323,6 @@ class SearchResult:
 FTS_RANK_WEIGHTS = "{0.025, 0.25, 0.375, 1.0}"
 
 
-async def _resolve_collection_ids(
-    session: AsyncSession, user: CurrentUser, collection_name: str | None
-) -> list[int]:
-    result = await session.execute(select(Collection).order_by(col(Collection.name)))
-    collections = [c for c in result.scalars() if await can_access(user, c, "read")]
-    if collection_name is not None:
-        collections = [c for c in collections if c.name == collection_name]
-    return [c.id for c in collections]
-
-
 async def search_fts(
     session: AsyncSession,
     user: CurrentUser,
@@ -343,7 +334,7 @@ async def search_fts(
     if ts_query is None:
         return []
 
-    collection_ids = await _resolve_collection_ids(session, user, collection_name)
+    collection_ids = await resolve_collection_ids(session, user, collection_name)
     if not collection_ids:
         return []
 
