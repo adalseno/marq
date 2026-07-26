@@ -124,3 +124,21 @@ async def test_embed_pending_documents_is_idempotent(
     second = await embed_pending_documents(session, user, llm_client, EMBED_MODEL, EMBED_DIM)
     await session.commit()
     assert second.docs_processed == 0
+
+
+@pytest.mark.integration
+async def test_search_vec_returns_empty_when_nothing_embedded_yet(
+    session: AsyncSession, user: CurrentUser, llm_client: LlmClient
+) -> None:
+    """Regression test: before anything has ever been embedded with a
+    model, its embeddings_<slug> table doesn't exist yet - search_vec
+    must return [] gracefully (matching the TS reference's
+    hasVectorColumn() guard), not raise a raw "relation does not exist"
+    SQL error."""
+    collection = await add_collection(session, user, "vecempty", "/tmp/vecempty")
+    await insert_content(session, "vhashd", "Some content never embedded.")
+    await insert_document(session, collection.id, "d.md", "D", "vhashd", utcnow(), utcnow())
+    await session.commit()
+
+    results = await search_vec(session, user, "anything", llm_client, EMBED_MODEL)
+    assert results == []

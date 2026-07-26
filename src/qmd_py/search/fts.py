@@ -22,7 +22,7 @@ from sqlmodel import col
 
 from qmd_py.auth import CurrentUser
 from qmd_py.db.models import Collection, CollectionContext, Content, Document, User
-from qmd_py.search._acl import resolve_collection_ids
+from qmd_py.search._acl import collection_names_by_id, resolve_collection_ids
 
 # =============================================================================
 # CJK handling
@@ -314,6 +314,10 @@ class SearchResult:
     context: str | None
     score: float
     source: str = "fts"
+    chunk_pos: int | None = None
+    """Character position of the matching chunk - only set by vector
+    search, used to anchor snippet extraction near the actual hit rather
+    than the start of the document."""
 
 
 # ts_rank's weights array is {D, C, B, A} (lowest to highest zone), each
@@ -367,12 +371,9 @@ async def search_fts(
     if not rows:
         return []
 
-    names_result = await session.execute(
-        select(col(Collection.id), col(Collection.name)).where(
-            col(Collection.id).in_({row.collection_id for row in rows})
-        )
+    collection_names = await collection_names_by_id(
+        session, {row.collection_id for row in rows}
     )
-    collection_names: dict[int, str] = {row.id: row.name for row in names_result}
 
     results = []
     for row in rows:

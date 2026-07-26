@@ -18,9 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from qmd_py.auth import CurrentUser
-from qmd_py.db.models import Collection, EmbeddingModel
+from qmd_py.db.models import EmbeddingModel
 from qmd_py.llm.client import LlmClient, format_doc_for_embedding, format_query_for_embedding
-from qmd_py.search._acl import resolve_collection_ids
+from qmd_py.search._acl import collection_names_by_id, resolve_collection_ids
 from qmd_py.search.fts import SearchResult, get_context_for_path, get_docid
 
 # Chunking: 900 tokens/chunk, 15% overlap - fixed character-window
@@ -59,6 +59,11 @@ _SLUG_SANITIZE = re.compile(r"[^a-z0-9_]+")
 def embeddings_table_name(model_slug: str) -> str:
     sanitized = _SLUG_SANITIZE.sub("_", model_slug.lower()).strip("_")
     return f"embeddings_{sanitized}"
+
+
+async def _embeddings_table_exists(session: AsyncSession, table_name: str) -> bool:
+    result = await session.execute(text("SELECT to_regclass(:name)"), {"name": table_name})
+    return result.scalar_one() is not None
 
 
 async def _pgvector_schema(session: AsyncSession) -> str:
@@ -230,6 +235,12 @@ async def search_vec(
         return []
 
     table_name = embeddings_table_name(model_slug)
+    if not await _embeddings_table_exists(session, table_name):
+        # Nothing embedded with this model yet - same graceful empty
+        # result the TS reference's searchVec gives via hasVectorColumn(),
+        # rather than a raw "relation does not exist" SQL error.
+        return []
+
     pgvector_schema = await _pgvector_schema(session)
     formatted_query = format_query_for_embedding(query, model_slug)
     embedding = (await llm_client.embed([formatted_query], model_slug))[0]
@@ -278,12 +289,9 @@ async def search_vec(
 
     ranked = sorted(best.values(), key=lambda r: r.distance)[:limit]
 
-    names_result = await session.execute(
-        select(col(Collection.id), col(Collection.name)).where(
-            col(Collection.id).in_({r.collection_id for r in ranked})
-        )
+    collection_names = await collection_names_by_id(
+        session, {r.collection_id for r in ranked}
     )
-    collection_names: dict[int, str] = {row.id: row.name for row in names_result}
 
     results = []
     for row in ranked:
@@ -303,6 +311,7 @@ async def search_vec(
                 context=context,
                 score=1 - row.distance,
                 source="vec",
+                chunk_pos=row.pos,
             )
         )
     return results

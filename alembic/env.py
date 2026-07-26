@@ -35,10 +35,14 @@ DB_URL = get_settings().sqlalchemy_url
 # on the same `qmd` database) comes entirely from the connection's
 # search_path being just `qmd_py` (see config.py) - none of our models
 # declare an explicit `schema=`, so there's no multi-schema reflection to
-# configure here at all. The one thing still worth filtering out is
-# Alembic's own `alembic_version` bookkeeping table: without this,
-# autogenerate proposes dropping and recreating the very table tracking
-# migration history, mid-migration.
+# configure here at all. Two things still need filtering out:
+# - Alembic's own `alembic_version` bookkeeping table: without this,
+#   autogenerate proposes dropping and recreating the very table tracking
+#   migration history, mid-migration.
+# - `embeddings_<slug>` tables (see search/vector.py's ensure_embedding_model):
+#   created dynamically at runtime, deliberately NOT part of SQLModel.metadata
+#   (one physical table per embedding model, not knowable at migration-authoring
+#   time) - without this, autogenerate proposes dropping every one it finds.
 def include_name(
     name: str | None,
     type_: Literal[
@@ -46,8 +50,16 @@ def include_name(
     ],
     parent_names: object,
 ) -> bool:
-    del parent_names  # part of Alembic's required callback signature, unused here
-    return not (type_ == "table" and name == "alembic_version")
+    if type_ == "table":
+        if name == "alembic_version":
+            return False
+        if name is not None and name.startswith("embeddings_"):
+            return False
+    elif isinstance(parent_names, dict):
+        table_name = parent_names.get("table_name")
+        if isinstance(table_name, str) and table_name.startswith("embeddings_"):
+            return False
+    return True
 
 
 def run_migrations_offline() -> None:

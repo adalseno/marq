@@ -25,3 +25,14 @@ async def resolve_collection_ids(
     if collection_name is not None:
         collections = [c for c in collections if c.name == collection_name]
     return [c.id for c in collections]
+
+
+async def collection_names_by_id(
+    session: AsyncSession, ids: set[int] | list[int]
+) -> dict[int, str]:
+    if not ids:
+        return {}
+    result = await session.execute(
+        select(col(Collection.id), col(Collection.name)).where(col(Collection.id).in_(ids))
+    )
+    return {row.id: row.name for row in result}
