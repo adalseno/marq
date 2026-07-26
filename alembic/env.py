@@ -1,11 +1,18 @@
 import asyncio
 from logging.config import fileConfig
+from typing import Literal
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlmodel import SQLModel
 
 from alembic import context
+from qmd_py.config import get_settings
+
+# Import models so their tables register on SQLModel.metadata before it's
+# used below - this module is otherwise unused, hence the noqa.
+from qmd_py.db import models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -16,16 +23,31 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+target_metadata = SQLModel.metadata
 
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
+# sqlalchemy.url isn't set in alembic.ini - pulled directly from our own
+# settings in run_async_migrations()/run_migrations_offline() below instead
+# of via config.set_main_option(), which routes through configparser and
+# chokes on the literal `%`s in a URL-encoded password/options string.
+DB_URL = get_settings().sqlalchemy_url
+
+# Isolation from the live TS reference implementation's tables (in `public`
+# on the same `qmd` database) comes entirely from the connection's
+# search_path being just `qmd_py` (see config.py) - none of our models
+# declare an explicit `schema=`, so there's no multi-schema reflection to
+# configure here at all. The one thing still worth filtering out is
+# Alembic's own `alembic_version` bookkeeping table: without this,
+# autogenerate proposes dropping and recreating the very table tracking
+# migration history, mid-migration.
+def include_name(
+    name: str | None,
+    type_: Literal[
+        "schema", "table", "column", "index", "unique_constraint", "foreign_key_constraint"
+    ],
+    parent_names: object,
+) -> bool:
+    del parent_names  # part of Alembic's required callback signature, unused here
+    return not (type_ == "table" and name == "alembic_version")
 
 
 def run_migrations_offline() -> None:
@@ -40,12 +62,12 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=DB_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_name=include_name,
     )
 
     with context.begin_transaction():
@@ -53,7 +75,11 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_name=include_name,
+    )
 
     with context.begin_transaction():
         context.run_migrations()
@@ -65,11 +91,7 @@ async def run_async_migrations() -> None:
 
     """
 
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = create_async_engine(DB_URL, poolclass=pool.NullPool)
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
