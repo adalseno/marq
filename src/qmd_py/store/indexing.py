@@ -105,6 +105,26 @@ def _discover_files(
 
 @dataclass
 class ReindexResult:
+    """Summary counts from one `reindex_collection()` pass.
+
+    Informational only - the CLI prints them - so they are not relied on
+    for correctness anywhere. Files skipped as unreadable or blank appear
+    in no bucket at all, so the four document counts need not sum to the
+    number of files on disk.
+
+    Attributes:
+        indexed: Files that had no document row and got one.
+        updated: Existing documents whose content or title changed. Also
+            counts a file reappearing after deactivation, and a title-only
+            change with an unchanged body hash.
+        unchanged: Active documents whose hash and title both matched, so
+            nothing was written.
+        removed: Documents deactivated because their file is no longer on
+            disk. Deactivated, not deleted - `marq cleanup` reclaims them.
+        orphaned_cleaned: Content rows dropped because no document, active
+            or inactive, still referenced them.
+    """
+
     indexed: int
     updated: int
     unchanged: int
@@ -118,10 +138,36 @@ async def reindex_collection(
     """Walk a collection's filesystem path, syncing `document`/`content`
     to match what's on disk - backs `collection add` and `update`.
 
-    Simplification vs. the TS reference: a title-only change (same
-    content hash) is counted as "updated" here rather than its own
-    separate `updated`-for-title-only bucket - these are just informational
-    summary counts shown to the user, not load-bearing for correctness.
+    Disk is the source of truth for one direction only: a file that has
+    vanished deactivates its document rather than deleting it, so the row
+    survives to be reactivated if the file comes back (switching git
+    branches over an indexed working tree does exactly that). `Document`
+    has a table-wide `UNIQUE(collection_id, path)` with no active/inactive
+    carve-out, so reactivating the existing row is the only option -
+    inserting a second one is impossible.
+
+    Simplification vs. the TS reference: a title-only change (same content
+    hash) counts as `updated` rather than getting its own bucket.
+
+    Files are skipped silently, not reported, in three cases: unreadable
+    or non-UTF-8 bytes, whitespace-only content, and anything excluded by
+    the collection's pattern or ignore rules.
+
+    Args:
+        name: Collection name, resolved against `user`'s own collections.
+
+    Returns:
+        Per-bucket counts; see `ReindexResult`.
+
+    Raises:
+        CollectionNotFoundError: No collection of that name owned by `user`.
+        PermissionDeniedError: `can_access()` refused `write` on it.
+
+    Note:
+        Reads every matched file and hashes it on each run - there is no
+        mtime shortcut. Content addressing makes that cheap in storage (an
+        unchanged file writes nothing) but not in I/O, so the cost scales
+        with total collection size, not with how much changed.
     """
     collection = await _resolve_owned_collection(session, user, name, "write")
     files = _discover_files(collection.path, collection.pattern, collection.ignore_patterns)
