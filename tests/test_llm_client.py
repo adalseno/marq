@@ -163,6 +163,23 @@ async def test_rerank_scores_default_to_zero_for_omitted_documents() -> None:
     assert scores == [0.0, 0.7, 0.0]
 
 
+async def test_rerank_ignores_out_of_range_indices() -> None:
+    """A router index past the end would raise IndexError; a negative one
+    would silently score the wrong document from the end. Both are
+    dropped, and the returned length still matches `documents`."""
+    payload = {
+        "results": [
+            {"index": 0, "relevance_score": 0.4},
+            {"index": 99, "relevance_score": 0.9},
+            {"index": -1, "relevance_score": 0.8},
+        ]
+    }
+    async with _client(_json_route(payload)) as client:
+        scores = await client.rerank("q", ["a", "b"], "reranker")
+
+    assert scores == [0.4, 0.0]
+
+
 async def test_rerank_raises_on_server_error() -> None:
     async with _client(_json_route({}, status_code=503)) as client:
         with pytest.raises(httpx.HTTPStatusError):

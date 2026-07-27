@@ -78,6 +78,33 @@ async def test_find_document_by_docid(session: AsyncSession, user: CurrentUser) 
     assert result.hash == "a1a1a1a1a1"
 
 
+async def test_find_document_by_colliding_docid_is_deterministic(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """A 6-char docid can front two documents. Which one wins is arbitrary,
+    but it must be the *same* one every call - `_active_document_refs` is
+    ordered so the first-match-wins scan can't depend on Postgres's row
+    order."""
+    collection_id = await _seed(session, user)
+    for suffix, path in (("1", "notes/collide-b.md"), ("2", "notes/collide-a.md")):
+        digest = f"ffffff{suffix}"
+        await insert_content(session, digest, f"colliding body {suffix}")
+        await insert_document(
+            session, collection_id, path, f"Collide {suffix}", digest, utcnow(), utcnow()
+        )
+    await session.commit()
+
+    resolved = []
+    for _ in range(4):
+        result = await find_document(session, user, "#ffffff")
+        assert isinstance(result, DocumentDetail)
+        resolved.append(result.display_path)
+
+    assert len(set(resolved)) == 1
+    # Ordered by (collection name, path), so the alphabetically first path wins.
+    assert resolved[0] == "docs/notes/collide-a.md"
+
+
 async def test_find_document_not_found_reports_similar_files(
     session: AsyncSession, user: CurrentUser
 ) -> None:
@@ -104,6 +131,17 @@ async def test_multi_get_glob(session: AsyncSession, user: CurrentUser) -> None:
     await _seed(session, user)
     results = await multi_get(session, user, "notes/*.md", line_numbers=False)
     assert len(results) == 2
+
+
+async def test_multi_get_mixed_comma_and_glob_matches_nothing(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """Pins the documented parity quirk: the two forms don't combine. A
+    pattern holding any glob metacharacter is treated wholly as a glob, so
+    the comma stays a literal and matches no path."""
+    await _seed(session, user)
+    results = await multi_get(session, user, "notes/alpha.md,notes/b*.md", line_numbers=False)
+    assert results == []
 
 
 async def test_multi_get_skips_oversized_files(session: AsyncSession, user: CurrentUser) -> None:

@@ -128,7 +128,7 @@ async def sample_collection(session: AsyncSession, user: CurrentUser) -> Collect
             continue
         rel_path = str(filepath.relative_to(FIXTURE_COLLECTION_PATH))
         content = filepath.read_text(encoding="utf-8")
-        digest = await hash_content(content)
+        digest = hash_content(content)
         title = extract_title(content, rel_path)
         await insert_content(session, digest, content)
         await insert_document(session, collection.id, rel_path, title, digest, utcnow(), utcnow())

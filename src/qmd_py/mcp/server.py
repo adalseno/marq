@@ -77,7 +77,12 @@ async def _default_collection_names(session: Any, user: CurrentUser) -> list[str
 
 
 def _filter_by_collections(results: list[Any], names: list[str]) -> list[Any]:
-    if len(names) <= 1:
+    """Empty name list means nothing is in scope, not "no filter" - see
+    cli/commands/read.py's `_filter_by_collections` for the full
+    reasoning."""
+    if not names:
+        return []
+    if len(names) == 1:
         return results
     prefixes = tuple(f"marq://{n}/" for n in names)
     return [r for r in results if r.file.startswith(prefixes)]

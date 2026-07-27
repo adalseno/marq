@@ -62,7 +62,11 @@ def _to_search_result(row: HybridQueryResult) -> SearchResult:
 def _filter_hybrid_by_collections(
     results: list[HybridQueryResult], names: list[str]
 ) -> list[HybridQueryResult]:
-    if len(names) <= 1:
+    """Empty name list means nothing is in scope, not "no filter" - see
+    read.py's `_filter_by_collections` for the full reasoning."""
+    if not names:
+        return []
+    if len(names) == 1:
         return results
     prefixes = tuple(f"marq://{n}/" for n in names)
     return [r for r in results if r.file.startswith(prefixes)]

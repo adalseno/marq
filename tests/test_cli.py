@@ -240,15 +240,6 @@ def test_excluded_collection_still_searched_when_scoped_explicitly(
     assert "alpha.md" in result.output
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Excluding every collection empties the default scope, but an empty "
-    "name list means 'no filter' downstream: _resolve_collection_names returns [], "
-    "so search_fts gets collection_name=None (resolve_collection_ids -> ALL "
-    "collections) and _filter_by_collections no-ops on len(names) <= 1. Unscoped "
-    "search returns everything instead of nothing. mcp/server.py's "
-    "_run_query_search has the same shape. Remove this marker when fixed.",
-)
 def test_excluding_every_collection_empties_default_search_scope(
     marq: Marq, tmp_path: Path
 ) -> None:

@@ -92,9 +92,20 @@ def _echo_empty_search_results(out_format: str) -> None:
 
 def _filter_by_collections(results: list[SearchResult], names: list[str]) -> list[SearchResult]:
     """Post-filter mirroring the TS reference's `filterByCollections`: a
-    single (or zero) collection name is a no-op here since the DB query
-    already scoped to it; multiple names filter the combined result set."""
-    if len(names) <= 1:
+    single collection name is a no-op here since the DB query already
+    scoped to it; multiple names filter the combined result set.
+
+    An *empty* name list means nothing is in scope - every collection is
+    excluded from default queries (`marq collection exclude`) - so it
+    filters everything out. It emphatically does not mean "no filter":
+    the search that produced `results` ran with `collection_name=None`,
+    which resolve_collection_ids reads as *all* collections, so treating
+    an empty list as a no-op (as an earlier version did) turned
+    "excluded from default queries" into "matches everything".
+    """
+    if not names:
+        return []
+    if len(names) == 1:
         return results
     prefixes = tuple(f"marq://{n}/" for n in names)
     return [r for r in results if r.filepath.startswith(prefixes)]

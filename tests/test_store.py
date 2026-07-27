@@ -39,7 +39,7 @@ from qmd_py.store import (
 
 
 async def test_hash_content_matches_sha256() -> None:
-    assert await hash_content("hello") == hashlib.sha256(b"hello").hexdigest()
+    assert hash_content("hello") == hashlib.sha256(b"hello").hexdigest()
 
 
 def test_extract_title_markdown_heading() -> None:
@@ -256,7 +256,7 @@ async def test_document_lifecycle_and_content_dedup(
     collection = await add_collection(session, user, "docs", "/tmp/docs")
     await session.commit()
 
-    hash_a = await hash_content("body one")
+    hash_a = hash_content("body one")
     await insert_content(session, hash_a, "body one")
     doc = await insert_document(
         session, collection.id, "a.md", "A", hash_a, utcnow(), utcnow()
@@ -267,7 +267,7 @@ async def test_document_lifecycle_and_content_dedup(
     assert found is not None
     assert found.id == doc.id
 
-    hash_b = await hash_content("body one revised")
+    hash_b = hash_content("body one revised")
     await insert_content(session, hash_b, "body one revised")
     await update_document(session, found, "A revised", hash_b, utcnow())
     await session.commit()

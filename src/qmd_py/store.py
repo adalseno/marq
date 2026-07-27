@@ -45,10 +45,14 @@ class PermissionDeniedError(Exception):
     pass
 
 
-async def hash_content(content: str) -> str:
+def hash_content(content: str) -> str:
     """SHA256 hex digest - matches the TS reference's `hashContent()`
     exactly (content-addressable hashes must agree byte-for-byte with the
-    TS side for the Phase 3 parity check to mean anything)."""
+    TS side for the Phase 3 parity check to mean anything).
+
+    Sync: pure CPU, no I/O to await. It was `async` only because the TS
+    original returns a Promise.
+    """
     return hashlib.sha256(content.encode()).hexdigest()
 
 
@@ -615,7 +619,7 @@ async def reindex_collection(
             continue
         seen_paths.add(rel_path)
 
-        digest = await hash_content(content)
+        digest = hash_content(content)
         title = extract_title(content, rel_path)
         modified_at = datetime.fromtimestamp(filepath.stat().st_mtime, tz=UTC)
 
@@ -729,13 +733,20 @@ async def _active_document_refs(
 ) -> list[tuple[Document, str]]:
     """(Document, owning collection name) for every active document in
     `collection_ids` - deliberately excludes body (lives in `Content`,
-    fetched only for the document(s) that actually end up matching)."""
+    fetched only for the document(s) that actually end up matching).
+
+    Ordered, so every "first match wins" scan over this list is
+    reproducible: `find_document` resolves a 6-char docid by hash prefix,
+    and two documents can share one. Unordered, which of them you got back
+    was down to whatever order Postgres happened to return rows in.
+    """
     if not collection_ids:
         return []
     result = await session.execute(
         select(Document, col(Collection.name))
         .join(Collection, col(Collection.id) == Document.collection_id)
         .where(col(Document.active), col(Document.collection_id).in_(collection_ids))
+        .order_by(col(Collection.name), col(Document.path))
     )
     return [(doc, name) for doc, name in result.all()]
 
@@ -917,7 +928,15 @@ async def multi_get(
     line_numbers: bool = True,
 ) -> list[MultiGetFile]:
     """Fetch multiple documents by glob pattern or comma-separated list -
-    port of the TS reference's `multiGet` (src/cli/qmd.ts)."""
+    port of the TS reference's `multiGet` (src/cli/qmd.ts).
+
+    The two forms are mutually exclusive, not combinable: `pattern` counts
+    as a comma-separated list only if it holds no glob metacharacter at
+    all. So `"a.md,b*.md"` is treated as one glob containing a literal
+    comma and matches nothing, rather than as two patterns. That's the TS
+    reference's behavior, kept deliberately for parity - split such a
+    request into separate calls.
+    """
     collection_ids = await resolve_collection_ids(session, user, None)
     if not collection_ids:
         return []

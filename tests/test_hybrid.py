@@ -210,15 +210,10 @@ async def test_expand_query_drops_variants_identical_to_the_original() -> None:
     assert [(q.type, q.query) for q in expanded] == [("vec", "sign in")]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="expand_query catches (httpx.HTTPError, KeyError, ValueError, TypeError) "
-    "but a router returning {'choices': []} raises IndexError from "
-    "chat_json's [0] subscript, so the whole query fails instead of degrading "
-    "to the unexpanded fallback its docstring promises. Remove this marker "
-    "once IndexError is caught too.",
-)
 async def test_expand_query_falls_back_on_empty_choices() -> None:
+    """Regression: chat_json subscripts choices[0], so an empty array
+    raises IndexError - which expand_query did not catch, failing the
+    whole query instead of degrading."""
     async with _mock_llm_client({"choices": []}) as client:
         expanded = await expand_query(client, "auth", "gen")
 

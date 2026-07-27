@@ -101,7 +101,15 @@ class LlmClient:
     async def rerank(self, query: str, documents: list[str], model: str) -> list[float]:
         """Relevance scores in the same order as `documents` - the
         router's response is keyed by `index` rather than guaranteed to
-        preserve input order, so results are re-sorted into place here."""
+        preserve input order, so results are re-sorted into place here.
+
+        Always returns one score per document (unscored ones stay 0.0);
+        callers rely on that length, hybrid.py zipping it against its
+        candidate chunks with `strict=True`. Out-of-range indices are
+        dropped rather than assigned: a stray large index would raise
+        IndexError, and - worse, because it fails silently - a negative
+        one would write onto the wrong document from the end.
+        """
         response = await self._client.post(
             "/rerank", json={"model": model, "query": query, "documents": documents}
         )
@@ -109,7 +117,9 @@ class LlmClient:
         results = response.json()["results"]
         scores = [0.0] * len(documents)
         for r in results:
-            scores[r["index"]] = r["relevance_score"]
+            index = r["index"]
+            if 0 <= index < len(scores):
+                scores[index] = r["relevance_score"]
         return scores
 
     async def tokenize(self, text: str, model: str) -> list[int]:

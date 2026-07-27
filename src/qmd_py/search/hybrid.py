@@ -162,7 +162,10 @@ async def expand_query(
             model=model,
             json_schema=_EXPAND_JSON_SCHEMA,
         )
-    except (httpx.HTTPError, KeyError, ValueError, TypeError):
+    except (httpx.HTTPError, IndexError, KeyError, ValueError, TypeError):
+        # IndexError included because chat_json subscripts choices[0]: a
+        # router answering {"choices": []} is exactly the misbehavior this
+        # fallback exists for, and it used to escape and fail the search.
         return [ExpandedQuery("lex", query), ExpandedQuery("vec", query)]
 
     expanded = []

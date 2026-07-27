@@ -59,6 +59,18 @@ def test_filter_by_collections_noop_for_single_collection() -> None:
     assert _filter_by_collections(results, ["a"]) == results
 
 
+def test_filter_by_collections_empty_scope_drops_everything() -> None:
+    """Regression: an empty name list means nothing is in default scope
+    (every collection excluded), not "no filter". Treating it as a no-op
+    made `collection exclude` return everything instead of nothing."""
+
+    class R:
+        def __init__(self, file: str) -> None:
+            self.file = file
+
+    assert _filter_by_collections([R("marq://a/x.md")], []) == []
+
+
 def test_filter_by_collections_filters_for_multiple() -> None:
     class R:
         def __init__(self, file: str) -> None:
