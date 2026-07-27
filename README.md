@@ -12,7 +12,7 @@ model loading, and a schema designed for eventual multi-user access
 control instead of a single local user.
 
 > [!NOTE]  
-> Even if inspired by `qmd`, this project has a completely different architecture based on a client-server model.
+> Although inspired by `qmd`, this project has a completely different architecture based on a client-server model.
 > The servers: `postgres` and `llm` can be on the local machine, containers, or remote. Setting them up is your task.
 > If you want a product ready to use, the original `qmd` is your choice.
 
