@@ -205,12 +205,13 @@ endpoints alongside full MCP JSON-RPC at `/mcp`.
 ## Development
 
 ```bash
-uv sync --all-extras       # install dev dependencies too
+uv sync --all-extras       # install dev + docs dependencies too
 uv run pytest              # run the test suite (needs a reachable Postgres + LLM router)
 uv run pytest -m "not integration"   # skip tests that need real Postgres/LLM
 uv run ruff check --fix .
 uv run mypy src alembic tests
 uv run alembic check       # verify models match the latest migration
+uv run zensical serve      # preview the docs site locally (docs/, zensical.toml)
 ```
 
 Tests use a fresh, isolated Postgres schema per test run (see

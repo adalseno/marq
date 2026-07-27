@@ -1,0 +1,121 @@
+[project]
+
+site_name = "marq"
+site_description = "Hybrid BM25 + vector + LLM-reranking search over Postgres/pgvector, with a CLI and an MCP server for agents."
+site_author = "adalseno"
+
+copyright = """
+marq — inspired by qmd (github.com/tobi/qmd), rewritten from scratch in Python.
+"""
+
+nav = [
+  { "Home" = "index.md" },
+  { "Quickstart" = "quickstart.md" },
+  { "Configuration" = "configuration.md" },
+  { "Commands" = [
+      { "Overview" = "commands/index.md" },
+      { "CLI reference" = "commands/cli-reference.md" },
+      { "Search & query" = "commands/search-and-query.md" },
+      { "Collections & context" = "commands/collections.md" },
+      { "Bench & doctor" = "commands/bench-and-doctor.md" },
+    ] },
+  { "MCP server" = "mcp-server.md" },
+  { "Architecture" = "architecture.md" },
+  { "Agent skills" = "skills.md" },
+  { "Development" = [
+      { "Setup & testing" = "development/testing.md" },
+      { "Code style & conventions" = "development/code-style.md" },
+    ] },
+  { "Code reference" = [
+      { "store" = "reference/store.md" },
+      { "config" = "reference/config.md" },
+      { "auth" = "reference/auth.md" },
+      { "vpath" = "reference/vpath.md" },
+      { "db.models" = "reference/db-models.md" },
+      { "search.fts" = "reference/search-fts.md" },
+      { "search.vector" = "reference/search-vector.md" },
+      { "search.hybrid" = "reference/search-hybrid.md" },
+      { "search._acl" = "reference/search-acl.md" },
+      { "llm.client" = "reference/llm-client.md" },
+      { "bench" = "reference/bench.md" },
+    ] },
+]
+
+[project.theme]
+language = "en"
+
+features = [
+    "content.code.copy",
+    "navigation.indexes",
+    "navigation.sections",
+    "navigation.top",
+    "search.highlight",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+# ----------------------------------------------------------------------------
+# Markdown extensions
+# ----------------------------------------------------------------------------
+[project.markdown_extensions.abbr]
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.footnotes]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.tables]
+[project.markdown_extensions.toc]
+permalink = true
+[project.markdown_extensions.pymdownx.betterem]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" }
+]
+# Content tabs (=== "label" blocks) - used in commands/search-and-query.md
+# to show the same result across --format options. Deviation from the
+# sibling project's config (which doesn't use tabs); alternate_style is
+# required for the Material-style tabbed widget.
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true
+# CLI reference page (docs/commands/cli-reference.md) - renders marq's
+# actual click.Group tree straight from the Command objects in
+# qmd_py.cli.main, so it can't drift out of sync with the code the way a
+# hand-transcribed --help dump would. attr_list (above) is required for
+# full command-path headers (e.g. "marq collection add" rather than the
+# ambiguous bare "add").
+[project.markdown_extensions."mkdocs-click"]
+
+# ----------------------------------------------------------------------------
+# API reference generation from docstrings (mkdocstrings)
+# ----------------------------------------------------------------------------
+[project.plugins.mkdocstrings]
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+show_source = true
+show_root_heading = true
+show_root_full_path = false
+heading_level = 2
+members_order = "source"
+merge_init_into_class = true
+show_signature_annotations = true
+separate_signature = true
+docstring_section_style = "list"

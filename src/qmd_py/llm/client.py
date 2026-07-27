@@ -1,4 +1,4 @@
-"""Pure HTTP client for the llama.cpp router (`QMD_LLM_BASE_URL`) - no local
+"""Pure HTTP client for the llama.cpp router (`MARQ_LLM_BASE_URL`) - no local
 model loading concept at all, unlike the TS reference's node-llama-cpp
 based `src/llm.ts`. Prompt formatting is ported from that file's
 `formatQueryForEmbedding`/`formatDocForEmbedding`/`isQwen3EmbeddingModel`

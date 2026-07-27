@@ -64,7 +64,7 @@ LLM reranking pass for faster, lower-quality results.
 ## Development
 
 ```sh
-uv sync --all-extras                 # install dependencies, incl. pytest/ruff/mypy
+uv sync --all-extras                 # install dependencies, incl. pytest/ruff/mypy/docs
 uv run marq <command>                # run from source
 uv run pytest                        # run the test suite
 uv run pytest -m "not integration"   # skip tests needing real Postgres/LLM
@@ -72,7 +72,15 @@ uv run ruff check --fix .
 uv run mypy src alembic tests
 uv run alembic check                 # verify models match the latest migration
 uv run alembic upgrade head          # apply migrations
+uv run zensical build --strict       # build the docs site (docs/, zensical.toml)
+uv run zensical serve                # preview it locally at localhost:8000
 ```
+
+Docs site: `zensical` (TOML-config static site generator) +
+`mkdocstrings`/`mkdocs-click` for auto-generated API/CLI reference —
+under the `docs` optional-dependencies extra. No CI/deployment wiring
+yet (Forgejo CI is deliberately skipped for now; GitHub Actions/Pages is
+the plan once the project moves there) — build and preview locally.
 
 Local dev Postgres: `cp .env.dev .env && podman-compose up -d` starts a
 disposable `pgvector/pgvector:pg16` container on `localhost:5433`,

@@ -1,0 +1,108 @@
+# Configuration
+
+marq reads settings from environment variables (prefix `MARQ_`) or a
+`.env` file in the current directory (via `pydantic-settings`). Only
+`MARQ_POSTGRES_URL` is required — everything else has a default.
+
+Running any command without `MARQ_POSTGRES_URL` set prints a short,
+actionable error instead of a raw traceback:
+
+```console
+$ marq doctor
+marq: invalid or missing configuration
+  MARQ_POSTGRES_URL: Field required
+
+Set these as environment variables or in a .env file in the current directory.
+```
+
+This comes from `cli/main.py`'s `main()`, which wraps the whole CLI in
+a `try/except` around pydantic's `ValidationError` — `get_settings()` is
+called lazily from deep inside individual commands' (often async)
+bodies, not once up front, so this outermost wrapper is the one place
+that reliably catches it regardless of which command triggered it.
+
+## Which file to start from
+
+- **`.env.dev`** (copy to `.env`) — the local dev-container setup: a
+  disposable `pgvector/pgvector:pg16` Postgres on `localhost:5433` with
+  throwaway credentials (safe to commit, not secrets), version-matched
+  to production. Use this for day-to-day development and running the
+  test suite.
+- **`.env.example`** — a template for pointing marq at your own
+  Postgres/LLM instance directly (production, or a real-server
+  live-parity check). Copy it, fill in your own host/credentials.
+
+## Variables
+
+### `MARQ_POSTGRES_URL`
+
+*(required, no default)* — `postgresql+psycopg://user:pass@host/db`.
+
+The only setting with no default, since there's no sensible one: marq
+has no bundled database, and every other setting can be inferred or
+defaulted around a working Postgres connection.
+
+### `MARQ_POSTGRES_SCHEMA`
+
+Default: `qmd_py`.
+
+The Postgres schema marq's tables live in, inside whatever database
+`MARQ_POSTGRES_URL` points at — not a separate database. This lets marq
+coexist in the same Postgres instance as unrelated services (including,
+historically, the original TS `qmd` reference implementation, which
+used `public`) without their tables colliding. The default value still
+reads `qmd_py` rather than `marq` — that's the Python package name
+(`qmd_py`), which stayed as-is during the CLI/MCP rebrand since it's an
+internal storage detail, not something you normally need to change. See
+[Architecture › Storage](architecture.md#storage) for why a single
+schema (not schema-per-collection or similar) was the right call.
+
+### `MARQ_LLM_BASE_URL` {: #marq_llm_base_url }
+
+Default: `http://ubuserver.internal:8099`.
+
+An OpenAI-style HTTP endpoint serving embeddings (`/v1/embeddings`),
+chat completions (`/v1/chat/completions`, used for query expansion),
+and reranking (`/rerank`) — e.g. a
+[llama.cpp server](https://github.com/ggml-org/llama.cpp). marq's LLM
+client (`llm/client.py`) is a pure `httpx` HTTP client with no local
+model loading concept at all, so this is the only thing that needs to
+be reachable for `vsearch`/`query`/`embed`/`doctor`'s router check to
+work. See `llm-stack/README.md` for running one locally instead of
+depending on a shared instance.
+
+### `MARQ_EMBED_MODEL`
+
+Default: `bge-m3-q8_0`.
+
+The embedding model slug used for `marq embed` and vector/hybrid search.
+Each embedding model gets its own physical Postgres table
+(`embeddings_<slug>`), so changing this doesn't destroy any previously
+generated embeddings under a different model — see
+[Architecture › Storage](architecture.md#storage).
+
+### `MARQ_GENERATE_MODEL`
+
+Default: `qwen2.5-3b-instruct-q4_k_m`.
+
+The chat-completion model used for `marq query`'s automatic query
+expansion (turning your text into typed `lex`/`vec`/`hyde` sub-queries).
+Not used at all if you write the structured `lex:`/`vec:`/`hyde:` query
+document yourself — see
+[Search & query](commands/search-and-query.md).
+
+### `MARQ_RERANK_MODEL`
+
+Default: `qwen3-reranker-0.6b-q8_0`.
+
+The reranking model `marq query` uses to score fused candidates against
+your query, unless you pass `--no-rerank`.
+
+### `MARQ_DEFAULT_USER_EMAIL`
+
+Default: `local@marq.local`.
+
+Identifies the single mocked local user marq creates on first use — see
+[Architecture › ACL](architecture.md#acl) for why this exists as a real
+row (not just an abstract concept) even though there's only ever one of
+it today.

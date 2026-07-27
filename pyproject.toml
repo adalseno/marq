@@ -32,6 +32,12 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.13",
 ]
+docs = [
+    "zensical>=0.0.51",
+    "mkdocstrings>=1.0.6",
+    "mkdocstrings-python>=2.0.5",
+    "mkdocs-click>=0.9.0",
+]
 
 [project.scripts]
 marq = "qmd_py.cli.main:main"
@@ -47,7 +53,7 @@ packages = ["src/qmd_py"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
-    "integration: real Postgres/llama.cpp roundtrip tests (require QMD_POSTGRES_URL/QMD_LLM_BASE_URL)",
+    "integration: real Postgres/llama.cpp roundtrip tests (require MARQ_POSTGRES_URL/MARQ_LLM_BASE_URL)",
 ]
 
 [tool.ruff]
