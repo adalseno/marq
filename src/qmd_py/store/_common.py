@@ -89,6 +89,16 @@ async def can_read(user: CurrentUser, collection: Collection) -> bool:
 async def _resolve_owned_collection(
     session: AsyncSession, user: CurrentUser, name: str, permission: str = "read"
 ) -> Collection:
+    """Resolve one collection by name and gate it through `can_access()`.
+
+    ACL note (see auth.py): the query below prefilters on
+    `owner_user_id == user.id`, so `can_access()` only ever sees
+    collections the caller already owns. A non-owner gets
+    CollectionNotFoundError, never PermissionDeniedError. When real grants
+    land this must become select-by-name-then-`can_access()`-filter, or a
+    collection granted to a non-owner stays invisible however
+    `can_access()` answers.
+    """
     result = await session.execute(
         select(Collection).where(
             col(Collection.owner_user_id) == user.id, col(Collection.name) == name

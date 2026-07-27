@@ -9,9 +9,28 @@ is additive, not a rearchitecture:
   something concrete has to own every collection from the start).
 - `can_access()` is *the* choke point every service-layer function calls
   before touching a collection's data (search, get, multi_get, collection
-  management - see store.py). It's mocked to always return True regardless
-  of `CollectionGrant` rows; swapping in a real check later only means
-  changing this one function's body, not any of its call sites.
+  management - see the store package). It's mocked to always return True
+  regardless of `CollectionGrant` rows.
+
+Swapping in a real check is one function body **plus** widening three
+queries. Two call-site shapes exist, and only one is fully ready:
+
+- Filter-then-check (`search/_acl.py`'s `resolve_collection_ids`, and
+  `store.collection.list_collections`) selects across ALL collections and
+  asks `can_access()` per row. This shape needs nothing but a real
+  `can_access()` - it already backs search, get, multi_get, glob, and the
+  vector-index health check.
+- Owner-prefiltered (`store._common._resolve_owned_collection`,
+  `store.context.list_contexts`, `store.context.context_check`) narrows to
+  `owner_user_id == user.id` *in SQL*, before `can_access()` is ever
+  consulted. A real check alone can't widen those: a collection granted to
+  a non-owner would stay invisible no matter what `can_access()` returns,
+  because the row never comes back from the query. Each of those three
+  carries a comment marking the spot; they need to become
+  select-all-then-`can_access()`-filter when grants go live.
+
+`tests/test_acl_gating.py` proves both shapes actually consult the choke
+point, and documents this same split from the test side.
 """
 
 from dataclasses import dataclass

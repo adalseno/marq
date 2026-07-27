@@ -53,6 +53,9 @@ class ContextRow:
 
 
 async def list_contexts(session: AsyncSession, user: CurrentUser) -> list[ContextRow]:
+    """ACL note (see auth.py): owner-prefiltered in SQL rather than gated
+    through `can_access()`, so a granted-but-not-owned collection's
+    contexts stay hidden until this query is widened."""
     result = await session.execute(
         select(
             col(Collection.name), col(CollectionContext.path_prefix), col(CollectionContext.context)
@@ -92,7 +95,11 @@ async def context_check(
     `getTopLevelPathsWithoutContext`, combined into the one `context check`
     command they jointly back (which the TS CLI never actually wired up
     despite CLAUDE.md documenting it - see the qmd-py plan's list of fixed
-    TS inconsistencies)."""
+    TS inconsistencies).
+
+    ACL note (see auth.py): owner-prefiltered in SQL rather than gated
+    through `can_access()` - same widening needed as `list_contexts` when
+    grants go live."""
     collections_result = await session.execute(
         select(Collection).where(col(Collection.owner_user_id) == user.id)
     )
