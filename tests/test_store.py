@@ -3,6 +3,7 @@ service layer, against a real scratch Postgres schema (see conftest.py).
 """
 
 import hashlib
+from pathlib import Path
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,8 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from qmd_py.auth import CurrentUser
 from qmd_py.db.models import User
 from qmd_py.store import (
+    _MAX_BRACE_EXPANSIONS,
     CollectionNotFoundError,
     PermissionDeniedError,
+    _discover_files,
+    _expand_braces,
     add_collection,
     add_context,
     cleanup_orphaned_content,
@@ -53,6 +57,65 @@ def test_extract_title_org() -> None:
 
 def test_extract_title_fallback_to_filename() -> None:
     assert extract_title("no heading here", "plain-notes.md") == "plain-notes"
+
+
+def test_expand_braces_single_group() -> None:
+    assert _expand_braces("**/*.{py,md,json}") == ["**/*.py", "**/*.md", "**/*.json"]
+
+
+def test_expand_braces_multiple_groups_yield_cross_product() -> None:
+    """Regression: expanding only the first group left the second as a
+    literal `{md,py}`, which glob matches against nothing - a collection
+    with a two-group pattern silently indexed zero files."""
+    assert set(_expand_braces("{src,docs}/**/*.{md,py}")) == {
+        "src/**/*.md",
+        "src/**/*.py",
+        "docs/**/*.md",
+        "docs/**/*.py",
+    }
+
+
+def test_expand_braces_nested_groups() -> None:
+    assert set(_expand_braces("*.{a,{b,c}}")) == {"*.a", "*.b", "*.c"}
+
+
+def test_expand_braces_without_group_is_passthrough() -> None:
+    assert _expand_braces("**/*.md") == ["**/*.md"]
+
+
+def test_expand_braces_unbalanced_brace_is_passthrough() -> None:
+    """No group to expand, so the pattern reaches glob as the literal
+    characters it already was, rather than being mangled."""
+    assert _expand_braces("**/*.{md") == ["**/*.{md"]
+
+
+def test_expand_braces_empty_alternative_is_kept() -> None:
+    assert _expand_braces("README{,.md}") == ["README", "README.md"]
+
+
+def test_expand_braces_dedupes_equivalent_expansions() -> None:
+    assert _expand_braces("*.{a,a}") == ["*.a"]
+
+
+def test_expand_braces_is_capped_for_pathological_patterns() -> None:
+    """Ten binary groups is 1024 combinations, each its own filesystem
+    walk - the cap stops `update` turning into a hang."""
+    assert len(_expand_braces("{a,b}" * 10)) == _MAX_BRACE_EXPANSIONS
+
+
+def test_discover_files_matches_every_brace_group(tmp_path: Path) -> None:
+    """End-to-end guard on the same bug at the layer that actually feeds
+    reindex_collection - no DB needed, just a real directory tree."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "src" / "a.py").write_text("a")
+    (tmp_path / "src" / "b.md").write_text("b")
+    (tmp_path / "docs" / "c.md").write_text("c")
+    (tmp_path / "docs" / "d.txt").write_text("d")
+
+    found = _discover_files(str(tmp_path), "{src,docs}/**/*.{md,py}", None)
+
+    assert found == ["docs/c.md", "src/a.py", "src/b.md"]
 
 
 @pytest.mark.integration

@@ -504,15 +504,49 @@ def utcnow() -> datetime:
 _EXCLUDE_DIRS = frozenset({"node_modules", ".git", ".cache", "vendor", "dist", "build"})
 
 
+# Matches the leftmost *innermost* alternation group (the character class
+# excludes braces, so an outer `{a,{b,c}}` can't match until its inner group
+# has been expanded away).
+_BRACE_GROUP = re.compile(r"\{([^{}]+)\}")
+
+_MAX_BRACE_EXPANSIONS = 1000
+"""Ceiling on the expansion of one pattern. Groups multiply
+(`{a,b}/{c,d}/{e,f}` is 8 patterns, each its own filesystem walk), so a
+pathological pattern could otherwise turn `update` into a hang."""
+
+
 def _expand_braces(pattern: str) -> list[str]:
-    """Expands one `{a,b,c}` alternation group - Python's glob has no
-    brace-expansion support (that's a shell feature), but our collection
-    patterns (e.g. `**/*.{py,md,json}`) need it."""
-    match = re.search(r"\{([^{}]+)\}", pattern)
-    if not match:
+    """Expands every `{a,b,c}` alternation group into the full cross
+    product - Python's glob has no brace-expansion support (that's a shell
+    feature), but our collection patterns (e.g. `{src,docs}/**/*.{py,md}`)
+    need it.
+
+    Expanding only the first group (as an earlier version did) left any
+    further group in the returned patterns as a literal `{...}`, which glob
+    matches against nothing - a collection with a two-group pattern
+    silently indexed zero files.
+
+    An unbalanced `{` has no group to match and is passed through
+    untouched, reaching glob as the literal character it already was.
+    """
+    match = _BRACE_GROUP.search(pattern)
+    if match is None:
         return [pattern]
+
     prefix, suffix = pattern[: match.start()], pattern[match.end() :]
-    return [prefix + alt + suffix for alt in match.group(1).split(",")]
+    expansions: list[str] = []
+    seen: set[str] = set()
+    for alternative in match.group(1).split(","):
+        # Recurse: `prefix + alternative + suffix` can still hold further
+        # groups, either alongside this one or nested inside it.
+        for expanded in _expand_braces(prefix + alternative + suffix):
+            if expanded in seen:
+                continue
+            seen.add(expanded)
+            expansions.append(expanded)
+            if len(expansions) >= _MAX_BRACE_EXPANSIONS:
+                return expansions
+    return expansions
 
 
 def _discover_files(
