@@ -6,6 +6,7 @@ adds the MCP server, Phase 10 adds bench/doctor/skill.
 
 import click
 
+from qmd_py.cli.commands.mcp import mcp_group
 from qmd_py.cli.commands.query import query_command
 from qmd_py.cli.commands.read import (
     get_command,
@@ -43,6 +44,7 @@ cli.add_command(update_command)
 cli.add_command(embed_command)
 cli.add_command(cleanup_command)
 cli.add_command(context_group)
+cli.add_command(mcp_group)
 
 
 if __name__ == "__main__":

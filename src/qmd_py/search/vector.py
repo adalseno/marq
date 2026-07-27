@@ -238,6 +238,53 @@ async def embed_pending_documents(
     return EmbedResult(docs_processed, chunks_embedded)
 
 
+@dataclass
+class VectorIndexHealth:
+    has_vector_index: bool
+    needs_embedding: int
+
+
+async def get_vector_index_health(
+    session: AsyncSession, user: CurrentUser, model_slug: str
+) -> VectorIndexHealth:
+    """Whether `model_slug` has ever been embedded at all, and how many of
+    the user's active documents still lack an embedding for it - backs
+    the MCP server's dynamic instructions and `status` tool (Phase 9),
+    which need this same "needs embedding" count `embed_pending_documents`
+    already computes internally but didn't expose on its own."""
+    collection_ids = await resolve_collection_ids(session, user, None)
+    if not collection_ids:
+        return VectorIndexHealth(False, 0)
+
+    table_name = embeddings_table_name(model_slug)
+    has_index = await _embeddings_table_exists(session, table_name)
+    if not has_index:
+        count = (
+            await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM document "
+                    "WHERE active AND collection_id = ANY(:collection_ids)"
+                ),
+                {"collection_ids": collection_ids},
+            )
+        ).scalar_one()
+        return VectorIndexHealth(False, count)
+
+    count = (
+        await session.execute(
+            text(
+                f"""
+                SELECT COUNT(DISTINCT d.hash) FROM document d
+                WHERE d.active AND d.collection_id = ANY(:collection_ids)
+                  AND d.hash NOT IN (SELECT hash FROM {table_name})
+                """
+            ),
+            {"collection_ids": collection_ids},
+        )
+    ).scalar_one()
+    return VectorIndexHealth(True, count)
+
+
 async def search_vec(
     session: AsyncSession,
     user: CurrentUser,

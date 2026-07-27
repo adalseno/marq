@@ -1,0 +1,110 @@
+"""`mcp` / `mcp stop` - MCP server transports (stdio by default, `--http`
+for Streamable HTTP, `--daemon` to background the HTTP server) - port of
+the TS reference's `mcp` CLI surface (src/cli/qmd.ts).
+"""
+
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+import click
+
+_STATE_DIR = Path.home() / ".cache" / "qmd-py"
+_PID_FILE = _STATE_DIR / "mcp.pid"
+_LOG_FILE = _STATE_DIR / "mcp.log"
+
+
+def _process_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _run_stdio() -> None:
+    import anyio
+
+    from qmd_py.mcp.server import create_mcp_server
+
+    async def main() -> None:
+        server = await create_mcp_server()
+        await server.run_stdio_async()
+
+    anyio.run(main)
+
+
+def _run_http(host: str, port: int) -> None:
+    import anyio
+
+    from qmd_py.mcp.server import create_mcp_server
+
+    async def main() -> None:
+        server = await create_mcp_server(http=True, host=host, port=port)
+        click.echo(f"QMD MCP server listening on http://{host}:{port}/mcp", err=True)
+        await server.run_streamable_http_async()
+
+    anyio.run(main)
+
+
+def _start_daemon(host: str, port: int) -> None:
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
+    if _PID_FILE.exists():
+        existing_pid = int(_PID_FILE.read_text().strip())
+        if _process_alive(existing_pid):
+            click.echo(f"MCP daemon already running (pid {existing_pid})", err=True)
+            raise SystemExit(1)
+        _PID_FILE.unlink()
+
+    with _LOG_FILE.open("ab") as log:
+        proc = subprocess.Popen(
+            [
+                sys.executable, "-m", "qmd_py.cli.main", "mcp",
+                "--http", "--host", host, "--port", str(port),
+            ],
+            stdout=log,
+            stderr=log,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    _PID_FILE.write_text(str(proc.pid))
+    click.echo(f"MCP daemon started (pid {proc.pid}), listening on http://{host}:{port}/mcp")
+    click.echo(f"Logs: {_LOG_FILE}")
+
+
+@click.group("mcp", invoke_without_command=True)
+@click.option("--http", is_flag=True, help="Use Streamable HTTP transport instead of stdio")
+@click.option("--port", type=int, default=8181, show_default=True, help="HTTP port")
+@click.option("--host", default="127.0.0.1", show_default=True, help="HTTP host")
+@click.option("--daemon", is_flag=True, help="Run the HTTP server in the background")
+@click.pass_context
+def mcp_group(ctx: click.Context, http: bool, port: int, host: str, daemon: bool) -> None:
+    """Start the MCP server (stdio by default), or manage the HTTP daemon (see 'mcp stop')."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if daemon and not http:
+        raise click.UsageError("--daemon requires --http")
+    if daemon:
+        _start_daemon(host, port)
+    elif http:
+        _run_http(host, port)
+    else:
+        _run_stdio()
+
+
+@mcp_group.command("stop")
+def stop_command() -> None:
+    """Stop the background MCP HTTP daemon."""
+    if not _PID_FILE.exists():
+        click.echo("No MCP daemon is running.", err=True)
+        raise SystemExit(1)
+    pid = int(_PID_FILE.read_text().strip())
+    if not _process_alive(pid):
+        _PID_FILE.unlink()
+        click.echo("No MCP daemon is running (stale pidfile removed).", err=True)
+        raise SystemExit(1)
+    os.kill(pid, signal.SIGTERM)
+    _PID_FILE.unlink()
+    click.echo(f"Stopped MCP daemon (pid {pid}).")
