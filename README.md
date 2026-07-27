@@ -11,6 +11,14 @@ of a per-project SQLite index, a pure HTTP LLM client instead of local
 model loading, and a schema designed for eventual multi-user access
 control instead of a single local user.
 
+> [!NOTE]  
+> Even if inspired by `qmd`, this project has a completely different architecture based on a client-server model.
+> The servers: `postgres` and `llm` can be on the local machine, containers, or remote. Setting them up is your task.
+> If you want a product ready to use, the original `qmd` is your choice.
+
+> [!CAUTION]  
+> The project has been thoroughly tested and is fully functional; nonetheless, it must be considered in the alpha stage. 
+
 ## Features
 
 - **Hybrid search** (`marq query`): automatic query expansion into
