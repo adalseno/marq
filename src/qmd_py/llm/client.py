@@ -44,6 +44,14 @@ class LlmClient:
     def __init__(self, base_url: str, timeout: float = 120.0) -> None:
         self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout)
 
+    async def list_models(self) -> list[str]:
+        """Model ids the router currently has presets for - backs `doctor`'s
+        check that the configured embed/generate/rerank models actually
+        exist on the router, not just in qmd-py's own settings."""
+        response = await self._client.get("/v1/models")
+        response.raise_for_status()
+        return [item["id"] for item in response.json()["data"]]
+
     async def embed(self, texts: list[str], model: str) -> list[list[float]]:
         response = await self._client.post(
             "/v1/embeddings", json={"model": model, "input": texts}

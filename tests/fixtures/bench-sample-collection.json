@@ -1,0 +1,55 @@
+{
+  "description": "Benchmark fixture for tests/fixtures/sample-collection (the frozen Tasknote fixture) - exact keyword, semantic, and cross-file retrieval across 6 documents.",
+  "version": 1,
+  "collection": "sample",
+  "queries": [
+    {
+      "id": "exact-http-api",
+      "query": "HTTP API",
+      "type": "exact",
+      "description": "Direct keyword match - 'HTTP API' appears verbatim in api.js",
+      "expected_files": ["src/api.js"],
+      "expected_in_top_k": 1
+    },
+    {
+      "id": "exact-sqlite",
+      "query": "SQLite storage",
+      "type": "exact",
+      "description": "Direct keyword match in tasks.py/README",
+      "expected_files": ["src/tasks.py"],
+      "expected_in_top_k": 3
+    },
+    {
+      "id": "semantic-migration",
+      "query": "how does the database schema get upgraded automatically for old files",
+      "type": "semantic",
+      "description": "Conceptual match for the startup schema migration - no exact keyword overlap",
+      "expected_files": ["src/tasks.py", "docs/architecture.md"],
+      "expected_in_top_k": 3
+    },
+    {
+      "id": "semantic-overdue",
+      "query": "checking whether a task is past its due date",
+      "type": "semantic",
+      "description": "Conceptual match for the isOverdue() helper",
+      "expected_files": ["src/models.ts"],
+      "expected_in_top_k": 3
+    },
+    {
+      "id": "topical-priority-history",
+      "query": "when were priority levels added to tasks",
+      "type": "topical",
+      "description": "Should find the changelog entry for priority levels",
+      "expected_files": ["CHANGELOG.md"],
+      "expected_in_top_k": 3
+    },
+    {
+      "id": "cross-domain-types",
+      "query": "shared type definitions between the frontend and the API",
+      "type": "cross-domain",
+      "description": "Should find the TS types file describing the shared shapes",
+      "expected_files": ["src/models.ts"],
+      "expected_in_top_k": 3
+    }
+  ]
+}
