@@ -17,7 +17,7 @@ control instead of a single local user.
 > If you want a product ready to use, the original `qmd` is your choice.
 
 > [!CAUTION]  
-> The project has been thoroughly tested and is fully functional; nonetheless, it must be considered in the alpha stage. 
+> The project has been thoroughly [tested](devs/COVERAGE.md) and is fully functional; nonetheless, it must be considered in the alpha stage. 
 
 ## Features
 
