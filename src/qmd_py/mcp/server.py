@@ -102,6 +102,16 @@ def _filter_by_collections(results: list[Any], names: list[str]) -> list[Any]:
 
 
 async def build_instructions(session: Any, user: CurrentUser, embed_model: str) -> str:
+    """Compose the server instructions sent in the `initialize` response.
+
+    Built from live index state - document counts, collection names,
+    whether anything is embedded yet - so a client knows what is
+    searchable without spending a tool call to find out.
+
+    Returns:
+        Markdown-ish plain text. Includes a prompt to run `marq embed`
+        when embeddings are missing or stale.
+    """
     status = await get_status(session, user)
     global_ctx = await get_global_context(session, user)
     health = await get_vector_index_health(session, user, embed_model)
@@ -172,6 +182,13 @@ async def build_instructions(session: Any, user: CurrentUser, embed_model: str) 
 
 
 class SubSearch(BaseModel):
+    """One typed sub-query in the `query` tool's `searches` argument.
+
+    The wire-facing counterpart of `ExpandedQuery`; a pydantic model
+    because its field descriptions become the JSON schema MCP clients
+    read.
+    """
+
     type: Literal["lex", "vec", "hyde"] = Field(
         description="lex = BM25 keywords (supports \"phrase\" and -negation); "
         "vec = semantic question; hyde = hypothetical answer passage"
@@ -759,6 +776,21 @@ def _register_rest_routes(mcp: FastMCP, start_time: float) -> None:
 async def create_mcp_server(
     *, http: bool = False, host: str = "127.0.0.1", port: int = 8181
 ) -> FastMCP:
+    """Build the MCP server with its tools, resource and instructions.
+
+    Async because the instructions are built from live index state, which
+    means a database round trip before the server can be constructed.
+
+    Args:
+        http: Also register the REST routes (`/health`, `/query`,
+            `/search`). They only exist under the HTTP transport; `/mcp`
+            itself is handled by the SDK.
+        host: Bind address, HTTP transport only.
+        port: Bind port, HTTP transport only.
+
+    Returns:
+        A configured `FastMCP`, ready for either transport.
+    """
     settings = get_settings()
     async with get_session() as session:
         user = await get_current_user(session)

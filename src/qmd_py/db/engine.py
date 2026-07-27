@@ -21,16 +21,34 @@ from qmd_py.config import get_settings
 
 @lru_cache
 def get_engine() -> AsyncEngine:
+    """The process-global async engine, built once from current settings.
+
+    Cached deliberately - one connection pool per process - which is also
+    why the test harness has to go through `reset_engine()` rather than
+    passing an engine in. See its docstring.
+    """
     return create_async_engine(get_settings().sqlalchemy_url)
 
 
 @lru_cache
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Session factory bound to `get_engine()`.
+
+    `expire_on_commit=False` so objects stay usable after a commit -
+    every service function returns ORM rows or dataclasses built from
+    them, and re-fetching attributes post-commit would be unexpected I/O.
+    """
     return async_sessionmaker(get_engine(), expire_on_commit=False)
 
 
 @asynccontextmanager
 async def get_session() -> AsyncIterator[AsyncSession]:
+    """Open a session for one CLI command or MCP tool call.
+
+    Does not commit: the caller decides, since a command may need several
+    service calls in one transaction. The session closes on exit,
+    rolling back anything uncommitted.
+    """
     async with get_session_factory()() as session:
         yield session
 

@@ -18,6 +18,13 @@ _EMBED_QWEN_PATTERN = re.compile(r"embed.*qwen", re.IGNORECASE)
 
 
 def is_qwen3_embedding_model(model: str) -> bool:
+    """Whether a model slug names a Qwen3 embedding model.
+
+    Decides which prompt template the embedding helpers apply. Matched on
+    the slug alone, since the router exposes no model metadata - so a
+    model whose name doesn't say "qwen" and "embed" gets the default
+    template even if it is one.
+    """
     return bool(_QWEN_EMBED_PATTERN.search(model) or _EMBED_QWEN_PATTERN.search(model))
 
 
@@ -31,6 +38,13 @@ def format_query_for_embedding(query: str, model: str) -> str:
 
 
 def format_doc_for_embedding(text: str, title: str | None, model: str) -> str:
+    """Wrap a document chunk in the model's expected document template.
+
+    Must match `format_query_for_embedding()`'s counterpart for the same
+    model: asymmetric embedding models are trained on a specific query
+    and document framing, and mixing templates degrades similarity
+    silently rather than failing.
+    """
     if is_qwen3_embedding_model(model):
         return f"{title}\n{text}" if title else text
     return f"title: {title or 'none'} | text: {text}"
@@ -65,6 +79,18 @@ class LlmClient:
         return [item["id"] for item in response.json()["data"]]
 
     async def embed(self, texts: list[str], model: str) -> list[list[float]]:
+        """Embed a batch of texts in one request.
+
+        Returns:
+            Vectors positionally matching `texts`. The router keys its
+            response by `index` rather than guaranteeing order, so the
+            results are re-sorted here - without that, every chunk in a
+            batch could get another chunk's vector.
+
+        Raises:
+            httpx.HTTPStatusError: The router returned an error status.
+            KeyError: The response had no `data` array.
+        """
         response = await self._client.post(
             "/v1/embeddings", json={"model": model, "input": texts}
         )
@@ -123,12 +149,28 @@ class LlmClient:
         return scores
 
     async def tokenize(self, text: str, model: str) -> list[int]:
+        """Count tokens using the model's own tokenizer.
+
+        Used to fit text to the reranker's per-pair budget, where a
+        chars-per-token estimate proved unsafe for dense code.
+
+        Returns:
+            Token ids; callers generally only need the length.
+
+        Raises:
+            httpx.HTTPStatusError: The router returned an error status.
+        """
         response = await self._client.post("/tokenize", json={"model": model, "content": text})
         response.raise_for_status()
         tokens: list[int] = response.json()["tokens"]
         return tokens
 
     async def aclose(self) -> None:
+        """Close the underlying HTTP connection pool.
+
+        Prefer the async context manager. Once closed the client cannot
+        be reused - further calls raise `RuntimeError`.
+        """
         await self._client.aclose()
 
     async def __aenter__(self) -> Self:

@@ -46,6 +46,21 @@ from qmd_py.db.models import Collection, User
 
 @dataclass(frozen=True)
 class CurrentUser:
+    """The authenticated caller, threaded through every service function.
+
+    A detached value, not an ORM row: it outlives any one session and is
+    safe to pass across them. `id` matches a real `User` row, since
+    `Collection.owner_user_id` is a NOT NULL foreign key.
+
+    Attributes:
+        id: The `User` row id this caller acts as.
+        email: Identifies the mocked local user; would come from the auth
+            token in a real deployment.
+        is_admin: Reserved for the real `can_access()` - the mocked one
+            ignores it, but the rule it will implement grants admins
+            access to every collection.
+    """
+
     id: int
     email: str
     is_admin: bool

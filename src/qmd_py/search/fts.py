@@ -52,6 +52,11 @@ def normalize_cjk_for_fts(text: str) -> str:
 
 
 def contains_cjk(text: str) -> bool:
+    """Whether `text` holds any character from the covered CJK blocks.
+
+    Covers the common BMP blocks only, not every rare extension - see
+    `_CJK_RANGES`.
+    """
     return _CJK_CHAR_PATTERN.search(text) is not None
 
 
@@ -65,6 +70,17 @@ def _is_word_char(ch: str) -> bool:
 
 
 def sanitize_fts_term(term: str) -> str:
+    """Strip a term down to what is safe inside a `to_tsquery` expression.
+
+    Keeps letters, digits, apostrophes and underscores; drops everything
+    else and lowercases the rest. That removal is what makes the query
+    injection-safe, since the result is interpolated into tsquery syntax
+    rather than bound as a parameter.
+
+    Returns:
+        The sanitized term, possibly empty - callers must drop empties
+        rather than emit a bare operator.
+    """
     return "".join(ch for ch in term if ch in ("'", "_") or _is_word_char(ch)).lower()
 
 
@@ -183,12 +199,29 @@ def build_ts_query(query: str) -> str | None:
 
 
 def validate_semantic_query(query: str) -> str | None:
+    """Check a `vec:`/`hyde:` sub-query for lex-only syntax.
+
+    Returns:
+        An actionable message, or None if the query is fine. Only
+        applied to sub-queries a caller spelled out - never to
+        `expand_query()`'s generated variants; see
+        `hybrid.validate_typed_queries()`.
+    """
     if re.search(r'(^|\s)-[\w"]', query):
         return "Negation (-term) is not supported in vec/hyde queries. Use lex for exclusions."
     return None
 
 
 def validate_lex_query(query: str) -> str | None:
+    """Check a `lex:` sub-query for syntax `build_ts_query` can't honour.
+
+    Catches a newline (each lex line is parsed separately) and an
+    unmatched double quote, which would otherwise run to end of input
+    and silently swallow the rest of the query as one phrase.
+
+    Returns:
+        An actionable message, or None if the query is fine.
+    """
     if re.search(r"[\r\n]", query):
         return (
             "Lex queries must be a single line. Remove newline characters or split into "
@@ -262,6 +295,12 @@ async def update_document_search_vector(session: AsyncSession, document_id: int)
 
 
 def get_docid(hash_: str) -> str:
+    """The short document id shown in output and accepted as `#abc123`.
+
+    Six hex chars of the content hash. Short enough to collide in
+    principle; `find_document()` resolves collisions deterministically
+    rather than uniquely.
+    """
     return hash_[:6]
 
 
@@ -302,6 +341,31 @@ async def get_context_for_path(
 
 @dataclass
 class SearchResult:
+    """One search hit, shared by lexical and vector search.
+
+    One shape for both so `cli/formatter.py` can render either without
+    caring which produced it; `source` says which did, and `chunk_pos` is
+    only meaningful for one of them.
+
+    Attributes:
+        filepath: Virtual URI, `marq://<collection>/<path>`.
+        display_path: `<collection>/<path>`, as printed.
+        title: Extracted heading or filename stem.
+        hash: Full content hash.
+        docid: Its six-char prefix.
+        collection_name: Owning collection.
+        modified_at: Source file mtime recorded at index time.
+        body_length: Character count of `body`.
+        body: Full document text - the whole body, not the matched part.
+        context: Hierarchical context for this path, or None.
+        score: Relevance. Not comparable across sources: `ts_rank` output
+            for lexical, `1 - cosine_distance` for vector.
+        source: `"fts"` or `"vec"`.
+        chunk_pos: Character offset of the matching chunk, set by vector
+            search only, so snippets anchor on the hit instead of the top
+            of the document.
+    """
+
     filepath: str
     display_path: str
     title: str
@@ -334,6 +398,25 @@ async def search_fts(
     limit: int = 20,
     collection_name: str | None = None,
 ) -> list[SearchResult]:
+    """Rank documents lexically with Postgres full-text search.
+
+    Args:
+        query: Lex syntax - prefix terms, `"quoted phrases"`, `-negation`.
+            Parsed by `build_ts_query()`.
+        limit: Maximum hits.
+        collection_name: Restrict to one collection; None searches every
+            collection the user can read.
+
+    Returns:
+        Hits ordered by descending rank, `source="fts"`. Empty when the
+        query has no positive term (a negation-only query), when no
+        collection is accessible, or when nothing matches - none of which
+        is an error.
+
+    Note:
+        Fetches one context per hit (an N+1). Bounded by `limit`, so it
+        is a fixed small cost per search rather than a scaling one.
+    """
     ts_query = build_ts_query(query)
     if ts_query is None:
         return []

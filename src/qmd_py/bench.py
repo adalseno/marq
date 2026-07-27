@@ -37,6 +37,18 @@ from qmd_py.search.vector import search_vec
 
 @dataclass
 class BenchmarkQuery:
+    """One query in a benchmark fixture, with its expected results.
+
+    Attributes:
+        id: Stable identifier, used to label result rows.
+        query: The query text. May use the multi-line typed syntax.
+        type: Free-form label for grouping (e.g. "lexical", "semantic").
+        description: What this query is meant to probe.
+        expected_files: Paths that should be retrieved. Matched loosely
+            by `paths_match()`, so collection prefixes need not agree.
+        expected_in_top_k: The k used for precision@k and hits@k.
+    """
+
     id: str
     query: str
     type: str
@@ -47,6 +59,17 @@ class BenchmarkQuery:
 
 @dataclass
 class BenchmarkFixture:
+    """A parsed benchmark fixture file.
+
+    Attributes:
+        description: What this fixture set covers.
+        version: Fixture format version.
+        queries: The queries to run.
+        collection: Restrict every query to this collection, or None to
+            search all of them. A per-file default, overridable at the
+            call.
+    """
+
     description: str
     version: int
     queries: list[BenchmarkQuery]
@@ -54,6 +77,13 @@ class BenchmarkFixture:
 
 
 def load_fixture(path: str | Path) -> BenchmarkFixture:
+    """Load and validate a benchmark fixture from JSON.
+
+    Raises:
+        ValueError: The file has no `queries` array.
+        KeyError: A query is missing a required field.
+        json.JSONDecodeError: The file is not valid JSON.
+    """
     data = json.loads(Path(path).read_text())
     if not isinstance(data.get("queries"), list):
         raise ValueError("Invalid fixture: missing 'queries' array")
@@ -82,8 +112,13 @@ def load_fixture(path: str | Path) -> BenchmarkFixture:
 
 
 def normalize_path(path: str) -> str:
-    """marq://collection/docs/readme.md -> docs/readme.md; lowercased,
-    stripped of leading/trailing slashes."""
+    """Reduce a path to a comparable form for scoring.
+
+    `marq://collection/docs/readme.md` becomes `docs/readme.md`:
+    lowercased, stripped of the scheme, collection prefix and surrounding
+    slashes, so a fixture can name files without knowing which
+    collection they were indexed into.
+    """
     if path.startswith("marq://"):
         without_scheme = path[len("marq://") :]
         slash_idx = without_scheme.find("/")
@@ -92,6 +127,14 @@ def normalize_path(path: str) -> str:
 
 
 def paths_match(result: str, expected: str) -> bool:
+    """Whether a retrieved path satisfies an expected one.
+
+    Deliberately loose: equal after normalization, or either being a
+    suffix of the other. That lets a fixture write `readme.md` for a
+    document actually stored at `docs/readme.md` - convenient for
+    hand-written fixtures, but it can credit a near-miss, so treat scores
+    as comparative rather than absolute.
+    """
     nr, ne = normalize_path(result), normalize_path(expected)
     return nr == ne or nr.endswith(ne) or ne.endswith(nr)
 
@@ -103,6 +146,23 @@ def _hits_within(result_files: list[str], expected_files: list[str], k: int) -> 
 
 @dataclass
 class ScoreMetrics:
+    """Retrieval quality for one query against one backend.
+
+    Attributes:
+        precision_at_k: Hits in the top k over `min(k, len(expected))`,
+            so a query expecting fewer files than k can still reach 1.0.
+        recall: Fraction of expected files found anywhere in the results.
+        recall_at_1: Recall counting only the top result.
+        recall_at_3: Recall counting the top three.
+        recall_at_5: Recall counting the top five.
+        mrr: Reciprocal rank of the first correct hit; 0.0 if none.
+        f1: Harmonic mean of `precision_at_k` and `recall`.
+        hits_at_k: Expected files found within the top k.
+        matched_files: Expected files that were found, anywhere.
+        unmatched_expected_files: Expected files that were missed - the
+            useful column when diagnosing a regression.
+    """
+
     precision_at_k: float
     recall: float
     recall_at_1: float
@@ -116,6 +176,17 @@ class ScoreMetrics:
 
 
 def score_results(result_files: list[str], expected_files: list[str], top_k: int) -> ScoreMetrics:
+    """Score one ranked result list against its expected files.
+
+    Args:
+        result_files: Retrieved paths, best first.
+        expected_files: Paths that should have been retrieved.
+        top_k: Cutoff for the @k metrics.
+
+    Returns:
+        All metrics for this query. An empty `expected_files` yields
+        zeros rather than dividing by zero.
+    """
     hits_at_k = _hits_within(result_files, expected_files, top_k)
     matched = [e for e in expected_files if any(paths_match(r, e) for r in result_files)]
     matched_set = set(matched)
@@ -305,6 +376,27 @@ BACKENDS: dict[str, _BackendFn] = {
 
 @dataclass
 class BackendResult:
+    """One backend's `ScoreMetrics` for one query, plus what it returned.
+
+    Attributes:
+        precision_at_k: See `ScoreMetrics`.
+        recall: See `ScoreMetrics`.
+        recall_at_1: See `ScoreMetrics`.
+        recall_at_3: See `ScoreMetrics`.
+        recall_at_5: See `ScoreMetrics`.
+        mrr: See `ScoreMetrics`.
+        f1: See `ScoreMetrics`.
+        hits_at_k: See `ScoreMetrics`.
+        total_expected: How many files the fixture expected, for reading
+            the ratios above in context.
+        latency_ms: Wall-clock time for this backend's run. Includes LLM
+            round trips, so hybrid backends are not comparable with bm25
+            on latency alone.
+        top_files: Retrieved paths, best first, truncated for display.
+        matched_files: Expected files found.
+        unmatched_expected_files: Expected files missed.
+    """
+
     precision_at_k: float
     recall: float
     recall_at_1: float
@@ -372,6 +464,16 @@ async def _run_query(
 
 @dataclass
 class QueryResult:
+    """Every backend's outcome for a single fixture query.
+
+    Attributes:
+        id: The fixture query's identifier.
+        query: Its query text.
+        type: Its grouping label.
+        backends: Backend name to result - the comparison the benchmark
+            exists to produce.
+    """
+
     id: str
     query: str
     type: str
@@ -380,6 +482,16 @@ class QueryResult:
 
 @dataclass
 class BenchmarkResult:
+    """A complete benchmark run.
+
+    Attributes:
+        timestamp: ISO-8601 UTC time the run finished, for comparing runs.
+        fixture: Path of the fixture used.
+        results: Per-query results, in fixture order.
+        summary: Backend name to averaged metrics across all queries -
+            the headline table.
+    """
+
     timestamp: str
     fixture: str
     results: list[QueryResult]
@@ -418,6 +530,28 @@ async def run_benchmark(
     backend_names: list[str] | None = None,
     on_progress: Callable[[str, str, float], None] | None = None,
 ) -> BenchmarkResult:
+    """Run every fixture query against every selected backend.
+
+    Framework-agnostic on purpose - no click dependency - so the CLI
+    layer supplies progress reporting rather than this owning output.
+
+    Args:
+        fixture_path: JSON fixture to load.
+        collection: Restrict all queries to one collection, overriding
+            the fixture's own setting.
+        backend_names: Which backends to run (`bm25`, `vector`,
+            `hybrid`, `full`). None runs all of them.
+        on_progress: Called as `(query_id, backend_name, latency_ms)`
+            after each backend finishes, for incremental output.
+
+    Returns:
+        Per-query results plus the averaged summary.
+
+    Note:
+        Runs real searches against real infrastructure, LLM calls
+        included - a full fixture against the hybrid backends takes
+        minutes, not seconds.
+    """
     fixture = load_fixture(fixture_path)
     active = backend_names or list(BACKENDS.keys())
     effective_collection = collection or fixture.collection
@@ -449,10 +583,12 @@ async def run_benchmark(
 
 
 def bench_result_to_json(result: BenchmarkResult) -> str:
+    """Serialize a whole run as indented JSON, for diffing runs."""
     return json.dumps(asdict(result), indent=2)
 
 
 def format_bench_table(results: list[QueryResult]) -> str:
+    """Render per-query, per-backend metrics as a fixed-width table."""
     def pad(s: str, n: int) -> str:
         return s[:n].ljust(n)
 
@@ -476,6 +612,7 @@ def format_bench_table(results: list[QueryResult]) -> str:
 
 
 def format_bench_summary(summary: dict[str, dict[str, float]]) -> str:
+    """Render the averaged per-backend summary as a fixed-width table."""
     def pad(s: str, n: int) -> str:
         return s[:n].ljust(n)
 

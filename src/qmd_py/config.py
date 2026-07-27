@@ -14,6 +14,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Application settings, read from `MARQ_*` env vars or a `.env` file.
+
+    Constructing this raises `pydantic.ValidationError` when a required
+    setting is missing - `cli/main.py` catches that at the outermost
+    level and turns it into a short message rather than a traceback.
+    """
+
     model_config = SettingsConfigDict(env_prefix="MARQ_", env_file=".env", extra="ignore")
 
     postgres_url: str
@@ -37,6 +44,14 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_url(self) -> str:
+        """`postgres_url` with the schema pinned via a libpq `options`
+        parameter.
+
+        Returns:
+            The DSN with `search_path` appended, joined with `?` or `&`
+            depending on whether the configured URL already carries a
+            query string.
+        """
         # Deliberately just our own schema, NOT `qmd_py,public`. TSVECTOR is
         # a built-in Postgres type (doesn't need `public` on the path at
         # all), and a multi-entry search_path breaks Alembic autogenerate in

@@ -30,6 +30,15 @@ async def resolve_collection_ids(
 async def collection_names_by_id(
     session: AsyncSession, ids: set[int] | list[int]
 ) -> dict[int, str]:
+    """Look up collection names in bulk, for labelling result rows.
+
+    Deliberately unfiltered by ACL: callers pass ids they already
+    resolved through `resolve_collection_ids()`, so re-checking would be
+    redundant.
+
+    Returns:
+        An id-to-name mapping; empty for empty input, without querying.
+    """
     if not ids:
         return {}
     result = await session.execute(

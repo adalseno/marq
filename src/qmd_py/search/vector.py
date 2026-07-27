@@ -36,6 +36,21 @@ _AVG_CHARS_PER_TOKEN = 3
 
 
 def chunk_document(body: str) -> list[tuple[str, int]]:
+    """Split a body into overlapping character windows for embedding.
+
+    Fixed-width slicing on a conservative chars-per-token estimate - no
+    heading or AST-aware break points, and no tokenizer verification.
+    That is a deliberate simplification of the TS reference; the estimate
+    can undercount dense code, which is why the rerank path re-measures
+    with the real tokenizer (see `hybrid._rerank_safe_text`).
+
+    Returns:
+        `(text, start_offset)` pairs, always at least one - an empty body
+        yields `[("", 0)]` rather than an empty list, so a document can
+        never silently go unembedded. Offsets index into `body`, and
+        consecutive chunks overlap by design so a match spanning a
+        boundary is still retrievable.
+    """
     max_chars = CHUNK_SIZE_TOKENS * _AVG_CHARS_PER_TOKEN
     overlap_chars = CHUNK_OVERLAP_TOKENS * _AVG_CHARS_PER_TOKEN
 
@@ -57,6 +72,15 @@ _SLUG_SANITIZE = re.compile(r"[^a-z0-9_]+")
 
 
 def embeddings_table_name(model_slug: str) -> str:
+    """Physical table name holding one embedding model's vectors.
+
+    Each model gets its own table, so adding a model is additive and
+    switching between them never drops data.
+
+    The slug is reduced to lowercase alphanumerics and underscores, which
+    is what makes it safe to interpolate into DDL - these names cannot be
+    bound as parameters.
+    """
     sanitized = _SLUG_SANITIZE.sub("_", model_slug.lower()).strip("_")
     return f"embeddings_{sanitized}"
 
@@ -163,6 +187,16 @@ def _to_vector_literal(embedding: list[float]) -> str:
 
 @dataclass
 class EmbedResult:
+    """Counts from one `embed_pending_documents()` pass.
+
+    Attributes:
+        docs_processed: Distinct content hashes embedded. Documents that
+            already had vectors for this model are skipped and not
+            counted.
+        chunks_embedded: Vectors written. Higher than `docs_processed`
+            whenever documents were long enough to split.
+    """
+
     docs_processed: int
     chunks_embedded: int
 
@@ -240,6 +274,17 @@ async def embed_pending_documents(
 
 @dataclass
 class VectorIndexHealth:
+    """Whether semantic search is usable, and how stale it is.
+
+    Attributes:
+        has_vector_index: Whether this model's table exists at all -
+            False means nothing has ever been embedded with it, and
+            vector search will return empty rather than fail.
+        needs_embedding: Active documents with no vector for this model.
+            Equals the total document count when `has_vector_index` is
+            False.
+    """
+
     has_vector_index: bool
     needs_embedding: int
 
@@ -294,6 +339,32 @@ async def search_vec(
     limit: int = 20,
     collection_name: str | None = None,
 ) -> list[SearchResult]:
+    """Rank documents by embedding similarity to the query.
+
+    Embeds the query, retrieves nearest chunks through the HNSW index,
+    then deduplicates to one hit per document, keeping its closest chunk.
+
+    Args:
+        model_slug: Which embedding model's table to search. Must match
+            what the documents were embedded with - vectors from
+            different models are not comparable.
+        limit: Maximum documents returned. Three times this many *chunks*
+            are retrieved first, since several may belong to one document.
+        collection_name: Restrict to one collection; None searches every
+            collection the user can read.
+
+    Returns:
+        Hits ordered by descending similarity, `source="vec"` and
+        `chunk_pos` set. Empty - not an error - when nothing has been
+        embedded with this model yet, when no collection is accessible,
+        or when the index holds no neighbours.
+
+    Note:
+        Makes one embedding call to the LLM router per invocation. The
+        collection filter is applied outside the nearest-neighbour CTE,
+        because `ORDER BY distance LIMIT n` is the only access pattern
+        the ANN index can serve.
+    """
     collection_ids = await resolve_collection_ids(session, user, collection_name)
     if not collection_ids:
         return []

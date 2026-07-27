@@ -19,6 +19,16 @@ from pathlib import Path
 
 @dataclass
 class SkillInfo:
+    """A discovered skill directory and its frontmatter.
+
+    Attributes:
+        name: Skill name from the frontmatter, used for lookup.
+        description: One-line summary shown in listings.
+        dir: Directory holding `SKILL.md` and any supplementary files.
+        hidden: Excluded from public listings, but still findable by
+            exact name.
+    """
+
     name: str
     description: str
     dir: Path
@@ -30,6 +40,16 @@ _CONTINUATION_RE = re.compile(r"^\s+\S")
 
 
 def parse_skill_frontmatter(content: str) -> dict[str, object] | None:
+    """Read the leading `---` block of a SKILL.md.
+
+    A deliberately small YAML subset - `name`, `description`, `hidden`,
+    with indented continuation lines folded into the preceding value - so
+    the package needs no YAML dependency for this one file format.
+
+    Returns:
+        The parsed fields, or None if the content has no frontmatter
+        block at all.
+    """
     match = _FRONTMATTER_RE.match(content.lstrip())
     if not match:
         return None
@@ -90,10 +110,23 @@ def discover_skills() -> list[SkillInfo]:
 
 
 def find_skill(name: str) -> SkillInfo | None:
+    """Look up one bundled skill by exact name.
+
+    Searches hidden skills too, so a hidden one can still be fetched
+    deliberately.
+
+    Returns:
+        The skill, or None if no bundled skill has that name.
+    """
     return next((s for s in discover_skills() if s.name == name), None)
 
 
 def read_skill_content(skill: SkillInfo) -> str:
+    """Read a skill's `SKILL.md` verbatim, frontmatter included.
+
+    Raises:
+        OSError: The directory exists but holds no readable `SKILL.md`.
+    """
     return (skill.dir / "SKILL.md").read_text(encoding="utf-8")
 
 

@@ -57,6 +57,15 @@ async def _rerank_safe_text(llm_client: LlmClient, text: str, model: str) -> str
 
 @dataclass
 class ExpandedQuery:
+    """One typed sub-query, from expansion or spelled out by the caller.
+
+    Attributes:
+        type: `"lex"` (BM25 keywords), `"vec"` (semantic) or `"hyde"` (a
+            hypothetical answer passage, embedded and searched as though
+            it were a document).
+        query: The text to search with.
+    """
+
     type: str  # "lex" | "vec" | "hyde"
     query: str
 
@@ -186,6 +195,20 @@ async def expand_query(
 
 @dataclass
 class RankedResult:
+    """A result reduced to what fusion needs.
+
+    Deliberately narrower than `SearchResult`: RRF only needs identity
+    and position, so lexical and vector hits collapse to one shape before
+    being fused. `file` is the identity key that matches them up.
+
+    Attributes:
+        file: Virtual URI - the key results are deduplicated on.
+        display_path: `<collection>/<path>`.
+        title: Extracted heading or filename stem.
+        body: Full document text.
+        score: Fused RRF score, not the original engine's score.
+    """
+
     file: str
     display_path: str
     title: str
@@ -203,6 +226,28 @@ class _RrfEntry:
 def reciprocal_rank_fusion(
     result_lists: list[list[RankedResult]], weights: list[float] | None = None, k: int = 60
 ) -> list[RankedResult]:
+    """Fuse several ranked lists into one by reciprocal rank.
+
+    Each list contributes `weight / (k + rank + 1)` per document, summed
+    across lists, so appearing in several lists beats ranking highly in
+    one. Scores from the underlying engines are ignored entirely - only
+    positions matter, which is what makes lexical and vector results
+    comparable at all.
+
+    Args:
+        result_lists: Ranked lists, best first. Empty lists are harmless.
+        weights: Per-list multipliers, positional. Lists beyond the end
+            default to 1.0, so a short list is not an error.
+        k: Damping constant. Larger flattens the difference between
+            ranks; the default of 60 is the value from the original RRF
+            paper.
+
+    Returns:
+        One entry per distinct `file`, ordered by descending fused score.
+        Documents ranked first in any list get a small bonus, and ones in
+        the top three a smaller one, to break ties toward strong single
+        signals.
+    """
     weights = weights or []
     entries: dict[str, _RrfEntry] = {}
 
@@ -244,6 +289,16 @@ def _hybrid_rrf_weights(query_types: list[str]) -> list[float]:
 
 @dataclass
 class RrfExplain:
+    """The fusion half of a `--explain` trace.
+
+    Attributes:
+        rank: Position after fusion, 1-based.
+        weight: How much the fused position counted toward the blend.
+            1.0 means the rerank pass did not run - either `--no-rerank`,
+            or the router failed and the query degraded to RRF ordering.
+        score: `1 / rank`, the positional component of the blend.
+    """
+
     rank: int
     weight: float
     score: float
@@ -263,6 +318,23 @@ class HybridQueryExplain:
 
 @dataclass
 class HybridQueryResult:
+    """One result from the full hybrid pipeline.
+
+    Attributes:
+        file: Virtual URI, `marq://<collection>/<path>`.
+        display_path: `<collection>/<path>`.
+        title: Extracted heading or filename stem.
+        body: Full document text.
+        best_chunk: The chunk that scored best against the query - what
+            the reranker actually judged, not the whole body.
+        best_chunk_pos: Its character offset, used to anchor snippets.
+        score: Final ranking score: blended RRF position and rerank
+            relevance, or plain `1 / rank` when reranking was skipped.
+        context: Hierarchical context for this path, or None.
+        docid: Six-char hash prefix.
+        explain: Score trace when `QueryOptions.explain` was set.
+    """
+
     file: str
     display_path: str
     title: str
@@ -303,6 +375,7 @@ class ModelConfig:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> ModelConfig:
+        """Build from application settings - the usual construction path."""
         return cls(
             embed=settings.embed_model,
             generate=settings.generate_model,
