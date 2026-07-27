@@ -41,8 +41,20 @@ class LlmClient:
     `/v1/chat/completions`, `/rerank`, `/tokenize`, and `/detokenize`
     endpoints."""
 
-    def __init__(self, base_url: str, timeout: float = 120.0) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout)
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 120.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        """`transport` is httpx's standard injection seam, used by the
+        tests to serve canned router responses through an
+        `httpx.MockTransport` without a live router. Production callers
+        leave it None and get httpx's real networking.
+        """
+        self._client = httpx.AsyncClient(
+            base_url=base_url.rstrip("/"), timeout=timeout, transport=transport
+        )
 
     async def list_models(self) -> list[str]:
         """Model ids the router currently has presets for - backs `doctor`'s

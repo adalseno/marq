@@ -4,8 +4,10 @@ real scratch Postgres schema, the real llama.cpp router, and the frozen
 tests/fixtures/sample-collection - see conftest.py's `sample_collection`).
 """
 
+import json
 from collections.abc import AsyncIterator
 
+import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -162,6 +164,65 @@ def test_validate_typed_queries_reports_the_first_problem_only() -> None:
     )
     assert error is not None
     assert error.startswith("vec: ")
+
+
+# =============================================================================
+# expand_query degradation (canned router responses - no live router)
+# =============================================================================
+
+
+def _mock_llm_client(payload: object) -> LlmClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    return LlmClient("http://router.invalid", transport=httpx.MockTransport(handler))
+
+
+async def test_expand_query_falls_back_when_router_returns_malformed_json() -> None:
+    """A model that ignores the JSON schema must degrade to the unexpanded
+    lex+vec pair, not fail the search."""
+    async with _mock_llm_client({"choices": [{"message": {"content": "not json"}}]}) as client:
+        expanded = await expand_query(client, "auth", "gen")
+
+    assert [(q.type, q.query) for q in expanded] == [("lex", "auth"), ("vec", "auth")]
+
+
+async def test_expand_query_falls_back_on_http_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={})
+
+    async with LlmClient("http://router.invalid", transport=httpx.MockTransport(handler)) as c:
+        expanded = await expand_query(c, "auth", "gen")
+
+    assert [q.query for q in expanded] == ["auth", "auth"]
+
+
+async def test_expand_query_drops_variants_identical_to_the_original() -> None:
+    payload = {
+        "choices": [
+            {"message": {"content": json.dumps({"lex": "auth", "vec": "sign in", "hyde": ""})}}
+        ]
+    }
+    async with _mock_llm_client(payload) as client:
+        expanded = await expand_query(client, "auth", "gen")
+
+    # "lex" equals the original query and "hyde" is empty; both are dropped.
+    assert [(q.type, q.query) for q in expanded] == [("vec", "sign in")]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="expand_query catches (httpx.HTTPError, KeyError, ValueError, TypeError) "
+    "but a router returning {'choices': []} raises IndexError from "
+    "chat_json's [0] subscript, so the whole query fails instead of degrading "
+    "to the unexpanded fallback its docstring promises. Remove this marker "
+    "once IndexError is caught too.",
+)
+async def test_expand_query_falls_back_on_empty_choices() -> None:
+    async with _mock_llm_client({"choices": []}) as client:
+        expanded = await expand_query(client, "auth", "gen")
+
+    assert [q.query for q in expanded] == ["auth", "auth"]
 
 
 # =============================================================================
