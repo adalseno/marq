@@ -130,6 +130,49 @@ def test_query_min_score_filters_matching_results_out(marq: Marq, tmp_path: Path
     assert "No results found." in result.output
 
 
+def test_query_rejects_negation_in_a_vec_line(marq: Marq, tmp_path: Path) -> None:
+    """Typed sub-queries are validated before any LLM call, so this fails
+    fast with an actionable message instead of silently searching for a
+    literal '-baseball'."""
+    _indexed_collection(marq, tmp_path)
+
+    result = marq("query", "lex: sports\nvec: sports -baseball")
+
+    assert result.exit_code == 1
+    assert "vec: Negation (-term) is not supported" in result.output
+    assert "Use lex for exclusions" in result.output
+
+
+def test_query_rejects_unmatched_quote_in_a_lex_line(marq: Marq, tmp_path: Path) -> None:
+    _indexed_collection(marq, tmp_path)
+
+    result = marq("query", 'lex: sports "unclosed\nvec: sports')
+
+    assert result.exit_code == 1
+    assert "unmatched double quote" in result.output
+
+
+def test_query_still_allows_negation_in_a_lex_line(marq: Marq, tmp_path: Path) -> None:
+    """Regression guard on the wiring: lex negation is the supported way
+    to exclude, so validation must not reject it."""
+    _indexed_collection(marq, tmp_path)
+
+    result = marq("query", "lex: authentication -sourdough\nvec: signing in", "--no-rerank")
+
+    assert result.exit_code == 0, result.output
+    assert "auth.md" in result.output
+
+
+def test_plain_query_with_a_dash_is_not_validated(marq: Marq, tmp_path: Path) -> None:
+    """Single-line queries aren't typed sub-queries: they're auto-expanded,
+    so the typed-syntax validators must not fire on them."""
+    _indexed_collection(marq, tmp_path)
+
+    result = marq("query", "authentication -sourdough", "--no-rerank")
+
+    assert result.exit_code == 0, result.output
+
+
 def test_doctor_reports_healthy_postgres_and_router(marq: Marq) -> None:
     result = marq("doctor")
 

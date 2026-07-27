@@ -50,7 +50,7 @@ from qmd_py.cli.snippet import extract_snippet
 from qmd_py.config import get_settings
 from qmd_py.db.engine import get_session
 from qmd_py.llm.client import LlmClient
-from qmd_py.search.hybrid import ExpandedQuery, hybrid_query
+from qmd_py.search.hybrid import ExpandedQuery, hybrid_query, validate_typed_queries
 from qmd_py.search.vector import get_vector_index_health
 from qmd_py.store import (
     DEFAULT_MULTI_GET_MAX_BYTES,
@@ -384,6 +384,15 @@ def _register_query_tool(mcp: FastMCP) -> None:
                 ],
                 isError=True,
             )
+        if searches:
+            invalid = validate_typed_queries(
+                [ExpandedQuery(s.type, s.query) for s in searches]
+            )
+            if invalid is not None:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"Error: {invalid}")],
+                    isError=True,
+                )
 
         items, primary_query = await _run_query_search(
             query=query,
@@ -696,6 +705,9 @@ def _register_rest_routes(mcp: FastMCP, start_time: float) -> None:
         searches = [
             SubSearch(type=s.get("type"), query=str(s.get("query") or "")) for s in raw_searches
         ]
+        invalid = validate_typed_queries([ExpandedQuery(s.type, s.query) for s in searches])
+        if invalid is not None:
+            return JSONResponse({"error": invalid}, status_code=400)
         raw_collections = params.get("collections")
         collections = (
             [str(c) for c in raw_collections] if isinstance(raw_collections, list) else None

@@ -226,6 +226,34 @@ async def test_query_tool_rejects_mutually_exclusive_arguments(mcp_env: str) -> 
     assert "mutually exclusive" in _text_of(result)
 
 
+async def test_query_tool_rejects_negation_in_a_vec_sub_query(mcp_env: str) -> None:
+    """Caller-supplied sub-queries are validated before any LLM call."""
+    await _seed_documents()
+    async with _client() as session:
+        await session.initialize()
+        result = await session.call_tool(
+            "query", {"searches": [{"type": "vec", "query": "sports -baseball"}]}
+        )
+
+    assert result.isError is True
+    text = _text_of(result)
+    assert "vec: Negation (-term) is not supported" in text
+
+
+async def test_query_tool_rejects_multiline_lex_sub_query(mcp_env: str) -> None:
+    """A newline can't reach a lex sub-query through the CLI's line-split
+    syntax, but an MCP client can send one directly."""
+    await _seed_documents()
+    async with _client() as session:
+        await session.initialize()
+        result = await session.call_tool(
+            "query", {"searches": [{"type": "lex", "query": "alpha\nbeta"}]}
+        )
+
+    assert result.isError is True
+    assert "must be a single line" in _text_of(result)
+
+
 async def test_document_resource_reads_slash_spanning_path(mcp_env: str) -> None:
     """The whole reason the resource bypasses FastMCP's @mcp.resource()
     decorator: its template matching can't express a path segment

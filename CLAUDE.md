@@ -61,6 +61,13 @@ line) gets 2x RRF weight — put the strongest signal first. `--explain`
 rank/weight and rerank score behind each result. `--no-rerank` skips the
 LLM reranking pass for faster, lower-quality results.
 
+Typed sub-queries are validated before any LLM call (`-term` negation is
+lex-only; a lex line can't hold an unmatched `"` or a newline) — the
+command exits 1 with the offending line's type. This applies only to
+sub-queries you spelled out, in the multi-line syntax or the MCP `query`
+tool's `searches`; a plain single-line query is auto-expanded and never
+validated, so a stray `-` in one is not an error.
+
 ## Development
 
 ```sh

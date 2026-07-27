@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from qmd_py.auth import CurrentUser
 from qmd_py.cli.snippet import extract_intent_terms
 from qmd_py.llm.client import LlmClient
-from qmd_py.search.fts import search_fts
+from qmd_py.search.fts import search_fts, validate_lex_query, validate_semantic_query
 from qmd_py.search.vector import chunk_document, search_vec
 
 # Ported constants (src/store.ts) - a strong BM25 signal skips the
@@ -89,6 +89,26 @@ def parse_structured_query(query: str) -> tuple[list[ExpandedQuery], str | None]
         return None
 
     return (typed, intent) if typed else None
+
+
+def validate_typed_queries(queries: list[ExpandedQuery]) -> str | None:
+    """First problem found among explicitly typed sub-queries, or None.
+
+    Deliberately applied only to sub-queries the *caller* spelled out -
+    the `lex:`/`vec:`/`hyde:` document syntax and the MCP `query` tool's
+    `searches` - never to `expand_query()`'s LLM-generated variants: a
+    stray `-term` in those is the model's doing, not a user mistake worth
+    failing the search over.
+    """
+    for q in queries:
+        error = (
+            validate_lex_query(q.query)
+            if q.type == "lex"
+            else validate_semantic_query(q.query)
+        )
+        if error is not None:
+            return f"{q.type}: {error}"
+    return None
 
 
 _EXPAND_SYSTEM_PROMPT = (

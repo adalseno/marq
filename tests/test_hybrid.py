@@ -20,6 +20,7 @@ from qmd_py.search.hybrid import (
     hybrid_query,
     parse_structured_query,
     reciprocal_rank_fusion,
+    validate_typed_queries,
 )
 from qmd_py.search.vector import embed_pending_documents
 
@@ -114,6 +115,53 @@ def test_parse_structured_query_unprefixed_line_degrades_to_none() -> None:
 
 def test_parse_structured_query_no_typed_lines_degrades_to_none() -> None:
     assert parse_structured_query("intent: only an intent\nintent: again") is None
+
+
+# =============================================================================
+# validate_typed_queries (pure unit tests)
+# =============================================================================
+
+
+def test_validate_typed_queries_accepts_well_formed_document() -> None:
+    typed = [
+        ExpandedQuery("lex", '"exact phrase" sports -baseball'),
+        ExpandedQuery("vec", "how do users sign in"),
+        ExpandedQuery("hyde", "A hypothetical passage about signing in."),
+    ]
+    assert validate_typed_queries(typed) is None
+
+
+def test_validate_typed_queries_rejects_unmatched_quote_in_lex() -> None:
+    error = validate_typed_queries([ExpandedQuery("lex", 'sports "unclosed')])
+    assert error is not None
+    assert error.startswith("lex: ")
+    assert "unmatched double quote" in error
+
+
+def test_validate_typed_queries_rejects_negation_in_vec() -> None:
+    error = validate_typed_queries([ExpandedQuery("vec", "sports -baseball")])
+    assert error is not None
+    assert error.startswith("vec: ")
+    assert "Use lex for exclusions" in error
+
+
+def test_validate_typed_queries_rejects_negation_in_hyde() -> None:
+    error = validate_typed_queries([ExpandedQuery("hyde", "a passage -without this")])
+    assert error is not None
+    assert error.startswith("hyde: ")
+
+
+def test_validate_typed_queries_allows_hyphen_inside_a_word() -> None:
+    """Only a leading `-` is negation; state-of-the-art must stay legal."""
+    assert validate_typed_queries([ExpandedQuery("vec", "state-of-the-art tooling")]) is None
+
+
+def test_validate_typed_queries_reports_the_first_problem_only() -> None:
+    error = validate_typed_queries(
+        [ExpandedQuery("vec", "-first"), ExpandedQuery("lex", '"second')]
+    )
+    assert error is not None
+    assert error.startswith("vec: ")
 
 
 # =============================================================================

@@ -29,6 +29,7 @@ from qmd_py.search.hybrid import (
     HybridQueryResult,
     hybrid_query,
     parse_structured_query,
+    validate_typed_queries,
 )
 from qmd_py.store import add_line_numbers
 
@@ -213,6 +214,10 @@ async def _query_impl(
     display_query = query
     if parsed:
         typed, parsed_intent = parsed
+        error = validate_typed_queries(typed)
+        if error is not None:
+            click.echo(f"marq: {error}", err=True)
+            raise SystemExit(1)
         preexpanded = typed
         effective_intent = intent or parsed_intent
         display_query = next(
