@@ -234,8 +234,11 @@ suite and `tests/fixtures/bench-sample-collection.json` (a benchmark
 fixture) — no external data or SSH access needed to run realistic
 multi-file tests.
 
-CLI and MCP commands are deliberately **not** end-to-end pytested: they
-bind to the real, globally-configured Postgres/LLM engine rather than
-the test suite's per-test isolated schema, so they're verified live
-instead (`uv run marq ...` against a real instance) — see
-`tests/test_mcp.py`'s module docstring for the reasoning.
+CLI and MCP commands **are** end-to-end pytested. Both bind to a real,
+process-global Postgres/LLM engine rather than the suite's per-test
+isolated schema, so two conftest fixtures redirect that global at a
+throwaway schema instead: `marq` (click's `CliRunner`) and `mcp_env` (a
+real MCP `ClientSession` over the SDK's in-memory transport). See
+`tests/test_cli.py` and `tests/test_mcp_server.py`.
+
+Coverage is summarised in [`devs/COVERAGE.md`](devs/COVERAGE.md).

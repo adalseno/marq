@@ -75,7 +75,7 @@ uv sync --all-extras                 # install dependencies, incl. pytest/ruff/m
 uv run marq <command>                # run from source
 uv run pytest                        # run the test suite
 uv run pytest -m "not integration"   # skip tests needing real Postgres/LLM
-uv run pytest --cov=qmd_py --cov-report=html --cov-report=term  # refresh devs/COVERAGE.md
+uv run pytest --cov=qmd_py --cov-report=term-missing  # then: coverage report --format=markdown
 uv run ruff check --fix .
 uv run mypy src alembic tests
 uv run alembic check                 # verify models match the latest migration
@@ -85,11 +85,11 @@ uv run zensical serve                # preview it locally at localhost:8000
 ```
 
 `devs/COVERAGE.md` is a committed, hand-refreshed coverage snapshot
-(README's "tested" links to it); `devs/coverage/` holds the browsable
-HTML report. Both go stale silently — refresh them together with the
-command above plus the move step documented in `devs/COVERAGE.md`, and
-only when the numbers have actually moved, since the HTML is ~2.6 MB
-across 48 files and rewrites wholesale.
+(README's "tested" links to it). It goes stale silently — refresh it with
+the command above when the numbers actually move. Only the Markdown
+summary is tracked: the HTML report is a build artifact, stays gitignored
+as `htmlcov/`, and is CI's job to publish once the project moves to
+GitHub Actions/Pages.
 
 Docs site: `zensical` (TOML-config static site generator) +
 `mkdocstrings`/`mkdocs-click` for auto-generated API/CLI reference —
