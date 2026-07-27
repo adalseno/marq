@@ -7,13 +7,20 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmd_py.auth import CurrentUser
-from qmd_py.search.fts import build_ts_query, search_fts
+from qmd_py.search.fts import (
+    build_ts_query,
+    is_dotted_token,
+    is_hyphenated_token,
+    search_fts,
+    update_document_search_vector,
+)
 from qmd_py.store import (
     add_collection,
     add_context,
     deactivate_document,
     insert_content,
     insert_document,
+    set_global_context,
     utcnow,
 )
 
@@ -53,6 +60,61 @@ def test_cjk_run_becomes_character_adjacency_phrase() -> None:
 
 def test_apostrophe_is_kept_in_term() -> None:
     assert build_ts_query("project's") == "project's:*"
+
+
+def test_empty_quoted_phrase_is_dropped() -> None:
+    assert build_ts_query('""') is None
+    assert build_ts_query('"" sports') == "sports:*"
+
+
+def test_unmatched_quote_consumes_the_rest_as_a_phrase() -> None:
+    """No closing quote just runs to end of input - a soft degrade. The
+    CLI/MCP surfaces reject this earlier via validate_lex_query."""
+    assert build_ts_query('"machine learning') == "(machine <-> learning)"
+
+
+def test_negated_quoted_phrase() -> None:
+    assert build_ts_query('sports -"instant replay"') == "sports:* & !(instant <-> replay)"
+
+
+def test_trailing_whitespace_is_ignored() -> None:
+    assert build_ts_query("sports   ") == "sports:*"
+    assert build_ts_query("   ") is None
+
+
+def test_punctuation_only_terms_are_dropped() -> None:
+    assert build_ts_query("--") is None
+    assert build_ts_query("C++ &") == "c:*"
+
+
+def test_leading_and_trailing_hyphens_are_not_compounds() -> None:
+    """is_hyphenated_token requires a word character at both ends, so
+    these fall through to ordinary prefix terms."""
+    assert build_ts_query("foo-") == "foo:*"
+    assert is_hyphenated_token("multi-agent") is True
+    assert is_hyphenated_token("-agent") is False
+    assert is_hyphenated_token("agent-") is False
+    assert is_hyphenated_token("noseparator") is False
+
+
+def test_dotted_token_classification() -> None:
+    assert is_dotted_token("2026.4.10") is True
+    assert is_dotted_token("v1.2") is True
+    assert is_dotted_token("plain") is False
+    assert is_dotted_token("trailing.") is False
+    assert is_dotted_token(".leading") is False
+
+
+def test_mixed_cjk_and_latin_term() -> None:
+    assert build_ts_query("文档 report") == "(文 <-> 档) & report:*"
+
+
+def test_negated_cjk_term() -> None:
+    assert build_ts_query("report -文档") == "report:* & !(文 <-> 档)"
+
+
+def test_multiple_negations_are_all_applied() -> None:
+    assert build_ts_query("sports -baseball -tennis") == "sports:* & !baseball:* & !tennis:*"
 
 
 @pytest.mark.integration
@@ -109,6 +171,65 @@ async def test_search_fts_includes_hierarchical_context(
     results = await search_fts(session, user, "unique-token-42")
     assert len(results) == 1
     assert results[0].context == "root context\n\njournal context"
+
+
+@pytest.mark.integration
+async def test_search_fts_returns_empty_for_an_unparseable_query(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """A negative-only query has no positive term, so build_ts_query
+    returns None and the search short-circuits to [] rather than issuing
+    an invalid tsquery."""
+    collection = await add_collection(session, user, "neg", "/tmp/neg")
+    await insert_content(session, "hashneg", "some searchable body")
+    await insert_document(
+        session, collection.id, "n.md", "N", "hashneg", utcnow(), utcnow()
+    )
+    await session.commit()
+
+    assert await search_fts(session, user, "-searchable") == []
+
+
+@pytest.mark.integration
+async def test_context_includes_the_users_global_context(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """`context add /` applies across collections and comes first, before
+    any per-path context."""
+    collection = await add_collection(session, user, "glob", "/tmp/glob")
+    await set_global_context(session, user, "global preamble")
+    await add_context(session, user, "glob", "", "collection context")
+    await insert_content(session, "hashg", "unique-global-token here")
+    await insert_document(
+        session, collection.id, "g.md", "G", "hashg", utcnow(), utcnow()
+    )
+    await session.commit()
+
+    results = await search_fts(session, user, "unique-global-token")
+    assert results[0].context == "global preamble\n\ncollection context"
+
+
+@pytest.mark.integration
+async def test_search_vector_is_cleared_when_a_document_goes_inactive(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """Recomputing the vector for a document that is no longer active
+    nulls it out instead of leaving a stale one behind."""
+    collection = await add_collection(session, user, "inact", "/tmp/inact")
+    await insert_content(session, "hashi", "indexed body text")
+    document = await insert_document(
+        session, collection.id, "i.md", "I", "hashi", utcnow(), utcnow()
+    )
+    await session.commit()
+
+    await deactivate_document(session, collection.id, "i.md")
+    await update_document_search_vector(session, document.id)
+    await session.commit()
+
+    # Refresh explicitly: search_vector is written by raw UPDATE, so the
+    # cached instance would otherwise lazy-load it as unexpected IO.
+    await session.refresh(document)
+    assert document.search_vector is None
 
 
 @pytest.mark.integration

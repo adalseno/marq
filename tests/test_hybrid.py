@@ -76,6 +76,37 @@ def test_rrf_empty_input_returns_empty() -> None:
     assert reciprocal_rank_fusion([]) == []
 
 
+def test_rrf_missing_weights_default_to_one() -> None:
+    """A weights list shorter than the result lists isn't an error - the
+    unlisted lists fall back to 1.0."""
+    short = reciprocal_rank_fusion([[_ranked("a")], [_ranked("b")]], weights=[1.0])
+    explicit = reciprocal_rank_fusion([[_ranked("a")], [_ranked("b")]], weights=[1.0, 1.0])
+
+    assert {r.file: r.score for r in short} == {r.file: r.score for r in explicit}
+
+
+def test_rrf_smaller_k_increases_contributions() -> None:
+    """k damps the 1/(k + rank + 1) term, so a smaller k means a larger
+    score for the same rank."""
+    default_k = reciprocal_rank_fusion([[_ranked("a")]])[0].score
+    small_k = reciprocal_rank_fusion([[_ranked("a")]], k=1)[0].score
+
+    assert small_k > default_k
+
+
+def test_rrf_empty_result_lists_contribute_nothing() -> None:
+    fused = reciprocal_rank_fusion([[], [_ranked("a")], []])
+
+    assert [r.file for r in fused] == ["a"]
+
+
+def test_rrf_orders_by_descending_score() -> None:
+    fused = reciprocal_rank_fusion([[_ranked("a"), _ranked("b"), _ranked("c")]])
+
+    assert [r.file for r in fused] == ["a", "b", "c"]
+    assert fused[0].score > fused[1].score > fused[2].score
+
+
 # =============================================================================
 # parse_structured_query (pure unit tests)
 # =============================================================================

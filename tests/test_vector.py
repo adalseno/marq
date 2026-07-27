@@ -14,6 +14,8 @@ from qmd_py.auth import CurrentUser
 from qmd_py.config import get_settings
 from qmd_py.llm.client import LlmClient
 from qmd_py.search.vector import (
+    CHUNK_OVERLAP_TOKENS,
+    CHUNK_SIZE_TOKENS,
     chunk_document,
     embed_pending_documents,
     embeddings_table_name,
@@ -43,6 +45,52 @@ def test_long_document_is_split_with_overlap() -> None:
     first_text, first_pos = chunks[0]
     _, second_pos = chunks[1]
     assert second_pos < first_pos + len(first_text)
+
+
+def test_empty_document_is_one_empty_chunk() -> None:
+    """Not zero chunks: embed_pending_documents zips chunks against the
+    embedding vectors with strict=True, so an empty list here would mean a
+    document silently never gets embedded."""
+    assert chunk_document("") == [("", 0)]
+
+
+def test_document_exactly_at_the_chunk_boundary_stays_one_chunk() -> None:
+    max_chars = CHUNK_SIZE_TOKENS * 3
+    assert chunk_document("x" * max_chars) == [("x" * max_chars, 0)]
+
+
+def test_document_one_char_over_the_boundary_splits() -> None:
+    max_chars = CHUNK_SIZE_TOKENS * 3
+    chunks = chunk_document("x" * (max_chars + 1))
+
+    assert len(chunks) == 2
+    assert chunks[0][1] == 0
+
+
+def test_chunk_positions_advance_by_size_minus_overlap() -> None:
+    max_chars = CHUNK_SIZE_TOKENS * 3
+    overlap_chars = CHUNK_OVERLAP_TOKENS * 3
+    chunks = chunk_document("x" * (max_chars * 3))
+
+    step = max_chars - overlap_chars
+    assert [pos for _, pos in chunks[:3]] == [0, step, step * 2]
+
+
+def test_every_chunk_position_indexes_its_own_text() -> None:
+    body = "".join(f"{i:04d}" for i in range(2000))
+    for text, pos in chunk_document(body):
+        assert body[pos : pos + len(text)] == text
+
+
+def test_last_chunk_reaches_the_end_of_the_body() -> None:
+    body = "y" * (CHUNK_SIZE_TOKENS * 3 * 2 + 17)
+    text, pos = chunk_document(body)[-1]
+
+    assert pos + len(text) == len(body)
+
+
+def test_embeddings_table_name_collapses_runs_of_punctuation() -> None:
+    assert embeddings_table_name("Qwen3::Embedding--0.6B") == "embeddings_qwen3_embedding_0_6b"
 
 
 @pytest.fixture

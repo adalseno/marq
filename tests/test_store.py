@@ -9,13 +9,14 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmd_py.auth import CurrentUser
-from qmd_py.db.models import User
+from qmd_py.db.models import Document, User
 from qmd_py.store import (
     _MAX_BRACE_EXPANSIONS,
     CollectionNotFoundError,
     PermissionDeniedError,
     _discover_files,
     _expand_braces,
+    _match_named_document,
     add_collection,
     add_context,
     cleanup_orphaned_content,
@@ -57,6 +58,43 @@ def test_extract_title_org() -> None:
 
 def test_extract_title_fallback_to_filename() -> None:
     assert extract_title("no heading here", "plain-notes.md") == "plain-notes"
+
+
+def test_extract_title_org_falls_back_to_first_heading() -> None:
+    """No `#+TITLE:` property, so the first `*` outline heading wins."""
+    assert extract_title("* First Heading\n\nbody", "doc.org") == "First Heading"
+
+
+def test_extract_title_org_deep_heading_level() -> None:
+    assert extract_title("*** Deep Heading\n", "doc.org") == "Deep Heading"
+
+
+def test_extract_title_org_without_any_heading_uses_filename() -> None:
+    assert extract_title("just body text", "notes.org") == "notes"
+
+
+def test_extract_title_strips_directories_from_the_filename() -> None:
+    assert extract_title("no heading", "deep/nested/file.md") == "file"
+
+
+def test_extract_title_extensionless_filename() -> None:
+    assert extract_title("no heading", "README") == "README"
+
+
+def test_extract_title_h2_heading_counts() -> None:
+    assert extract_title("## Second Level\n\nbody", "doc.md") == "Second Level"
+
+
+def test_extract_title_notes_quirk_keeps_notes_without_a_successor() -> None:
+    """The "Notes" skip only applies when there's a following `##` to
+    prefer; otherwise the generic heading stands."""
+    assert extract_title("# Notes\n\nbody with no other heading", "doc.md") == "Notes"
+
+
+def test_extract_title_ignores_headings_in_non_markdown_extensions() -> None:
+    """The heading rules are extension-gated, so a `#` comment in a Python
+    file is not mistaken for a title."""
+    assert extract_title("# not a markdown heading\n", "script.py") == "script"
 
 
 def test_expand_braces_single_group() -> None:
@@ -101,6 +139,44 @@ def test_expand_braces_is_capped_for_pathological_patterns() -> None:
     """Ten binary groups is 1024 combinations, each its own filesystem
     walk - the cap stops `update` turning into a hang."""
     assert len(_expand_braces("{a,b}" * 10)) == _MAX_BRACE_EXPANSIONS
+
+
+def _doc(path: str) -> Document:
+    return Document(
+        collection_id=1, path=path, title=path, hash="h" * 10,
+        created_at=utcnow(), modified_at=utcnow(),
+    )
+
+
+def test_match_named_document_prefers_an_exact_bare_path() -> None:
+    refs = [(_doc("notes/alpha.md"), "docs"), (_doc("alpha.md"), "docs")]
+
+    found = _match_named_document(refs, "alpha.md")
+
+    assert found is not None
+    assert found[0].path == "alpha.md"
+
+
+def test_match_named_document_falls_back_to_a_suffix_match() -> None:
+    refs = [(_doc("notes/alpha.md"), "docs")]
+
+    found = _match_named_document(refs, "alpha.md")
+
+    assert found is not None
+    assert found[0].path == "notes/alpha.md"
+
+
+def test_match_named_document_virtual_path_requires_the_right_collection() -> None:
+    """An exact `marq://` path is resolved against that collection only -
+    no suffix fallback - so a wrong collection name finds nothing."""
+    refs = [(_doc("alpha.md"), "docs")]
+
+    assert _match_named_document(refs, "marq://other/alpha.md") is None
+    assert _match_named_document(refs, "marq://docs/alpha.md") is not None
+
+
+def test_match_named_document_unknown_path_is_none() -> None:
+    assert _match_named_document([(_doc("alpha.md"), "docs")], "nowhere.md") is None
 
 
 def test_discover_files_matches_every_brace_group(tmp_path: Path) -> None:
