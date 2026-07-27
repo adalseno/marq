@@ -17,6 +17,25 @@ from qmd_py.store._common import _resolve_owned_collection
 async def add_context(
     session: AsyncSession, user: CurrentUser, collection_name: str, path_prefix: str, text: str
 ) -> None:
+    """Attach context prose to a collection, or to a path within it.
+
+    Upserts: setting context for a prefix that already has one replaces
+    the text rather than failing or accumulating.
+
+    Contexts nest. A document inherits every context whose prefix it
+    starts under, joined most-general-first, so a root context and a
+    `journal/` context both reach `journal/entry.md`.
+
+    Args:
+        path_prefix: Path within the collection, or `""` for the whole
+            collection. Matched as a path prefix, not a glob.
+        text: The prose to attach. Search results carry it alongside the
+            body so an agent knows what kind of document it is reading.
+
+    Raises:
+        CollectionNotFoundError: No collection of that name owned by `user`.
+        PermissionDeniedError: `can_access()` refused `write` on it.
+    """
     collection = await _resolve_owned_collection(session, user, collection_name, "write")
     stmt = (
         pg_insert(CollectionContext)
@@ -30,9 +49,16 @@ async def add_context(
 
 
 async def set_global_context(session: AsyncSession, user: CurrentUser, text: str | None) -> None:
-    """The TS reference's `context add /` - applies across all of a user's
-    collections. User-scoped here, not a single system-wide value (see
-    User.global_context's docstring in db/models.py)."""
+    """Set the context that applies across all of this user's collections.
+
+    The TS reference's `context add /`. User-scoped here, not a single
+    system-wide value (see `User.global_context` in db/models.py). It is
+    prepended before any per-path context, so it reads as the most general
+    statement about everything this user has indexed.
+
+    Args:
+        text: The prose, or None to clear it.
+    """
     result = await session.execute(select(User).where(col(User.id) == user.id))
     user_row = result.scalar_one()
     user_row.global_context = text
@@ -41,21 +67,45 @@ async def set_global_context(session: AsyncSession, user: CurrentUser, text: str
 
 
 async def get_global_context(session: AsyncSession, user: CurrentUser) -> str | None:
+    """Return this user's global context.
+
+    Returns:
+        The prose, or None when unset - which is also what a user row that
+        somehow doesn't exist yields, since the caller has no use for the
+        distinction.
+    """
     result = await session.execute(select(col(User.global_context)).where(col(User.id) == user.id))
     return result.scalar_one_or_none()
 
 
 @dataclass
 class ContextRow:
+    """One stored context entry, flattened for listing.
+
+    Attributes:
+        collection: Owning collection's name.
+        path: The prefix this context applies to; `""` means the whole
+            collection.
+        context: The prose itself.
+    """
+
     collection: str
     path: str
     context: str
 
 
 async def list_contexts(session: AsyncSession, user: CurrentUser) -> list[ContextRow]:
-    """ACL note (see auth.py): owner-prefiltered in SQL rather than gated
-    through `can_access()`, so a granted-but-not-owned collection's
-    contexts stay hidden until this query is widened."""
+    """Every context this user has set, across all their collections.
+
+    Returns:
+        Rows ordered by collection name, then path prefix - so a
+        collection's root context sorts before its sub-path ones.
+
+    Note:
+        ACL (see auth.py): owner-prefiltered in SQL rather than gated
+        through `can_access()`, so a granted-but-not-owned collection's
+        contexts stay hidden until this query is widened.
+    """
     result = await session.execute(
         select(
             col(Collection.name), col(CollectionContext.path_prefix), col(CollectionContext.context)
@@ -70,6 +120,20 @@ async def list_contexts(session: AsyncSession, user: CurrentUser) -> list[Contex
 async def remove_context(
     session: AsyncSession, user: CurrentUser, collection_name: str, path_prefix: str
 ) -> bool:
+    """Delete the context set for one exact path prefix.
+
+    Args:
+        path_prefix: Must match what was stored exactly - this deletes one
+            row, it does not clear a subtree.
+
+    Returns:
+        True if a row was deleted, False if there was nothing set for that
+        prefix. Removing a context that isn't there is not an error.
+
+    Raises:
+        CollectionNotFoundError: No collection of that name owned by `user`.
+        PermissionDeniedError: `can_access()` refused `write` on it.
+    """
     collection = await _resolve_owned_collection(session, user, collection_name, "write")
     result = await session.execute(
         delete(CollectionContext).where(
@@ -83,6 +147,15 @@ async def remove_context(
 
 @dataclass
 class CollectionMissingContext:
+    """A collection with no context set at all.
+
+    Attributes:
+        name: Collection name.
+        path: Its indexed filesystem path.
+        doc_count: Active documents in it - a rough measure of how much
+            search quality is being left on the table.
+    """
+
     name: str
     path: str
     doc_count: int
@@ -97,9 +170,26 @@ async def context_check(
     despite CLAUDE.md documenting it - see the qmd-py plan's list of fixed
     TS inconsistencies).
 
-    ACL note (see auth.py): owner-prefiltered in SQL rather than gated
-    through `can_access()` - same widening needed as `list_contexts` when
-    grants go live."""
+    Two different gaps are reported, which is why the return value is a
+    pair: a collection with *no* context at all, and a collection that has
+    some context but leaves whole top-level directories uncovered. A
+    collection with a root (`""`) context is never reported for the
+    second, since that covers everything beneath it.
+
+    Returns:
+        A `(collections, paths)` pair. `collections` lists collections
+        with no context, sorted by name. `paths` maps a collection name to
+        its uncovered top-level directories, sorted, and omits collections
+        with nothing missing - so an empty dict means fully covered.
+
+    Note:
+        ACL (see auth.py): owner-prefiltered in SQL rather than gated
+        through `can_access()` - same widening needed as `list_contexts`
+        when grants go live.
+
+        Runs two to three queries per collection (an N+1), which is fine
+        for an interactive advisory command.
+    """
     collections_result = await session.execute(
         select(Collection).where(col(Collection.owner_user_id) == user.id)
     )

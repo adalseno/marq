@@ -21,7 +21,11 @@ async def cleanup_orphaned_content(session: AsyncSession) -> int:
     time an inactive document was the last remaining reference. Run
     `delete_inactive_documents` first (see the `cleanup` command) to
     actually reclaim content orphaned only by now-abandoned inactive
-    rows."""
+    rows.
+
+    Returns:
+        Number of content rows deleted.
+    """
     result = await session.execute(
         delete(Content).where(~col(Content.hash).in_(select(col(Document.hash))))
     )
@@ -30,14 +34,33 @@ async def cleanup_orphaned_content(session: AsyncSession) -> int:
 
 
 async def delete_llm_cache(session: AsyncSession) -> int:
+    """Empty the cached-LLM-response table.
+
+    Global, not per user: the cache is keyed by prompt, so there is
+    nothing user-scoped to preserve.
+
+    Returns:
+        Number of cached responses deleted.
+    """
     result = await session.execute(delete(LlmCache))
     await session.flush()
     return result.rowcount or 0  # type: ignore[attr-defined]
 
 
 async def delete_inactive_documents(session: AsyncSession, user: CurrentUser) -> int:
-    """Hard-deletes deactivated document rows (not their content - that's
-    `cleanup_orphaned_content`'s job) for every collection `user` owns."""
+    """Hard-delete deactivated document rows across a user's collections.
+
+    Removes the rows only; their content is `cleanup_orphaned_content`'s
+    job, and has to run *after* this to reclaim bodies whose last
+    remaining reference was one of these inactive rows.
+
+    Deliberately irreversible: once these are gone, a file that reappears
+    is indexed as a new document rather than reactivating its old row.
+
+    Returns:
+        Number of document rows deleted; 0 when the user has no
+        accessible collections.
+    """
     collection_ids = await resolve_collection_ids(session, user, None)
     if not collection_ids:
         return 0

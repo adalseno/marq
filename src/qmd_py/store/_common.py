@@ -19,11 +19,20 @@ from qmd_py.db.models import Collection
 
 
 class CollectionNotFoundError(Exception):
-    pass
+    """No collection of that name is visible to the caller.
+
+    Also what a *non-owner* gets for a collection that does exist, since
+    lookups prefilter on ownership in SQL before `can_access()` is
+    consulted - see auth.py.
+    """
 
 
 class PermissionDeniedError(Exception):
-    pass
+    """The collection was found, but `can_access()` refused the operation.
+
+    Unreachable while `can_access()` is mocked to always allow; the call
+    sites raise it so a real check needs no new error handling.
+    """
 
 
 def hash_content(content: str) -> str:
@@ -113,9 +122,26 @@ async def _resolve_owned_collection(
 
 
 def utcnow() -> datetime:
+    """Timezone-aware current time.
+
+    Returns:
+        `datetime.now(UTC)` - aware, not naive, since every timestamp
+        column is `TIMESTAMP WITH TIME ZONE` and psycopg rejects naive
+        values for those.
+    """
     return datetime.now(UTC)
 
 
 def add_line_numbers(text: str, start_line: int = 1) -> str:
+    """Prefix each line with `N: `.
+
+    Args:
+        start_line: Number for the first line, so a slice taken from
+            partway through a document still reports true line numbers.
+
+    Returns:
+        The text with every line prefixed. A trailing newline yields a
+        numbered empty final line, since the split is unconditional.
+    """
     lines = text.split("\n")
     return "\n".join(f"{start_line + i}: {line}" for i, line in enumerate(lines))
