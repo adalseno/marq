@@ -1,7 +1,7 @@
 [project]
 name = "qmd-py"
 version = "0.1.0"
-description = "Centralized markdown search over Postgres/pgvector, with an LLM search pipeline over HTTP — a from-scratch Python rewrite of qmd (github.com/tobi/qmd)"
+description = "marq: centralized markdown/code search over Postgres/pgvector, with a hybrid BM25+vector+rerank LLM search pipeline over HTTP and an MCP server for agents — inspired by qmd (github.com/tobi/qmd), rewritten from scratch in Python"
 readme = "README.md"
 authors = [
     { name = "adalseno", email = "adalseno@yahoo.com" }
