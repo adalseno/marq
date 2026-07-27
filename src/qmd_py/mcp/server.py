@@ -27,6 +27,7 @@ TS reference's actual JSON schema, not internal Python code.
 from __future__ import annotations
 
 import time
+from importlib.metadata import version
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
 
@@ -744,6 +745,13 @@ async def create_mcp_server(
     mcp = FastMCP(
         name="qmd", instructions=instructions, host=host, port=port, json_response=True
     )
+    # FastMCP's own constructor has no `version` parameter - it always
+    # constructs its internal low-level Server with version=None, which
+    # falls back to reporting the installed `mcp` SDK's own version in
+    # initialize()'s serverInfo, not qmd-py's. Set it directly (a plain
+    # public attribute on the low-level Server) so a client actually sees
+    # which qmd-py release it's talking to.
+    mcp._mcp_server.version = version("qmd-py")
     _register_query_tool(mcp)
     _register_get_tool(mcp)
     _register_multi_get_tool(mcp)
