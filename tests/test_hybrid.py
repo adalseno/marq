@@ -205,6 +205,12 @@ def test_validate_typed_queries_reports_the_first_problem_only() -> None:
 # =============================================================================
 
 
+def _chat_completion(payload: dict[str, str]) -> dict[str, object]:
+    """A /v1/chat/completions body whose message content is `payload` as
+    JSON - the shape expand_query() parses."""
+    return {"choices": [{"message": {"content": json.dumps(payload)}}]}
+
+
 def _mock_llm_client(payload: object) -> LlmClient:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=payload)
@@ -252,6 +258,65 @@ async def test_expand_query_falls_back_on_empty_choices() -> None:
         expanded = await expand_query(client, "auth", "gen")
 
     assert [q.query for q in expanded] == ["auth", "auth"]
+
+
+# =============================================================================
+# rerank degradation
+# =============================================================================
+
+
+@pytest.mark.integration
+async def test_hybrid_query_falls_back_to_rrf_when_rerank_fails(
+    session: AsyncSession, user: CurrentUser, sample_collection: Collection
+) -> None:
+    """A router that 500s on /rerank must not fail the whole query: the
+    candidates are already retrieved and fused by then, so the pipeline
+    degrades to RRF-position scores instead of losing them.
+
+    Postgres is real (retrieval has to actually produce candidates); the
+    router is a MockTransport that serves query expansion normally and
+    then fails every rerank call.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rerank":
+            return httpx.Response(500, json={"error": "rerank exploded"})
+        if request.url.path == "/tokenize":
+            return httpx.Response(200, json={"tokens": [1, 2, 3]})
+        if request.url.path == "/v1/embeddings":
+            return httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1] * 1024}]})
+        return httpx.Response(200, json=_chat_completion({"lex": "priority", "vec": "priority"}))
+
+    async with LlmClient("http://router.invalid", transport=httpx.MockTransport(handler)) as c:
+        results = await hybrid_query(
+            session, user, "priority levels", c, _MODELS,
+            QueryOptions(collection_name="sample"),
+        )
+
+    assert results
+    # Pure 1/rrf_rank scores, exactly as --no-rerank produces.
+    assert results[0].score == pytest.approx(1.0)
+    assert [r.score for r in results] == sorted((r.score for r in results), reverse=True)
+
+
+@pytest.mark.integration
+async def test_hybrid_query_rerank_fallback_still_honours_min_score(
+    session: AsyncSession, user: CurrentUser, sample_collection: Collection
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path in ("/rerank", "/tokenize"):
+            return httpx.Response(503, json={})
+        if request.url.path == "/v1/embeddings":
+            return httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1] * 1024}]})
+        return httpx.Response(200, json=_chat_completion({"lex": "priority", "vec": "priority"}))
+
+    async with LlmClient("http://router.invalid", transport=httpx.MockTransport(handler)) as c:
+        results = await hybrid_query(
+            session, user, "priority levels", c, _MODELS,
+            QueryOptions(collection_name="sample", min_score=0.99),
+        )
+
+    assert all(r.score >= 0.99 for r in results)
 
 
 # =============================================================================

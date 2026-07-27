@@ -434,7 +434,13 @@ async def hybrid_query(
     rrf_rank_map = {c.file: i + 1 for i, c in enumerate(candidates)}
     candidate_map = {c.file: c for c in candidates}
 
-    if skip_rerank:
+    def _rrf_only_results() -> list[HybridQueryResult]:
+        """Rank purely by fused RRF position (1/rank), no rerank pass.
+
+        Backs both `skip_rerank` and the fallback when the rerank round
+        trip fails - the candidates are already retrieved and fused at
+        that point, so degraded ordering beats no results at all.
+        """
         results = []
         for filepath, rrf_rank in rrf_rank_map.items():
             score = 1 / rrf_rank
@@ -467,6 +473,9 @@ async def hybrid_query(
         results.sort(key=lambda r: r.score, reverse=True)
         return results[:limit]
 
+    if skip_rerank:
+        return _rrf_only_results()
+
     chunks_to_rerank = [
         (cand.file, chunk_info[cand.file][0]) for cand in candidates if cand.file in chunk_info
     ]
@@ -474,10 +483,18 @@ async def hybrid_query(
         return []
 
     rerank_query = f"{intent}\n\n{query}" if intent else query
-    doc_texts = [
-        await _rerank_safe_text(llm_client, text, rerank_model) for _, text in chunks_to_rerank
-    ]
-    rerank_scores = await llm_client.rerank(rerank_query, doc_texts, rerank_model)
+    try:
+        # Both calls hit the router: /tokenize (for the per-pair token
+        # budget) and /rerank. Either failing used to abort the whole
+        # query, even though the fused candidates were already in hand -
+        # the same misbehavior expand_query() degrades on, so degrade the
+        # same way here rather than losing good-enough results.
+        doc_texts = [
+            await _rerank_safe_text(llm_client, text, rerank_model) for _, text in chunks_to_rerank
+        ]
+        rerank_scores = await llm_client.rerank(rerank_query, doc_texts, rerank_model)
+    except (httpx.HTTPError, IndexError, KeyError, ValueError, TypeError):
+        return _rrf_only_results()
 
     blended = []
     for (filepath, _text), rerank_score in zip(chunks_to_rerank, rerank_scores, strict=True):
