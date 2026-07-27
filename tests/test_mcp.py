@@ -1,16 +1,14 @@
 """Phase 9: MCP server unit tests - the pure/session-taking helpers
 behind mcp/server.py's tools and dynamic instructions.
 
-Full protocol-level exercise (a real MCP ClientSession driving `query`/
-`get`/`multi_get`/`status` and the `marq://` resource end to end) is
-deliberately NOT pytested here: `create_mcp_server()`'s tool handlers
-each open their own session via `db.engine.get_session()`, which is
-bound to whatever the environment's real settings point at (the dev
-container, per .env) - exactly like the CLI's `cli/runtime.py`. That's
-the same reason this project's CLI commands (Phases 6-8) are manually
-live-verified against the dev container and the real ubuserver.internal
-server rather than pytested end-to-end; the MCP server follows the same
-established split.
+The protocol-level pass (a real MCP ClientSession driving `get`/
+`multi_get`/`status` and the `marq://` resource end to end) lives in
+test_mcp_server.py. It became possible once conftest.py grew the
+`mcp_env` fixture, which points `db.engine.get_session()`'s
+process-global engine at a throwaway schema instead of whatever `.env`
+resolves to - the obstacle this docstring used to describe. The helpers
+below stay unit-tested here because they're worth pinning directly,
+without a client session in the way.
 """
 
 import pytest

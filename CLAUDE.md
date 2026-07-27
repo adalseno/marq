@@ -106,14 +106,19 @@ required; `MARQ_LLM_BASE_URL` can point anywhere OpenAI-endpoint-shaped.
   stand-in for a real external collection, usable without SSH access or
   external data. `tests/fixtures/bench-sample-collection.json` is a
   matching benchmark fixture for `marq bench`.
-- **CLI and MCP commands are deliberately not end-to-end pytested.**
-  They call `db/engine.py`'s real, process-global (`lru_cache`'d)
-  `get_engine()`/`get_session()`, bound to whatever `MARQ_POSTGRES_URL`
-  actually resolves to — not the test suite's per-test isolated schema.
-  Verify these live instead: `uv run marq <command>` against a real
-  reachable Postgres + LLM router, ideally both the dev container and
-  production before calling a change done. See `tests/test_mcp.py`'s
-  module docstring for the full reasoning.
+- **CLI and MCP commands are pytested end-to-end** via two conftest
+  fixtures that redirect `db/engine.py`'s process-global (`lru_cache`'d)
+  `get_engine()`/`get_session()` at a throwaway schema: `marq` (sync,
+  click `CliRunner` — see `tests/test_cli.py`, `test_cli_query.py`) and
+  `mcp_env` (async, a real MCP `ClientSession` over the SDK's in-memory
+  transport — see `tests/test_mcp_server.py`). Both patch
+  `MARQ_POSTGRES_SCHEMA` and call `db/engine.py`'s `reset_engine()`.
+  CLI tests must be **sync**: every command body ends in
+  `cli/runtime.py`'s `asyncio.run()`, which refuses to start inside a
+  running loop. `reset_engine()` also has to run between invocations in
+  one process, since pooled connections don't survive their loop.
+- `tests/test_cli_skills.py` needs neither Postgres nor the router, so
+  it runs in the default `-m "not integration"` suite.
 - **Never skip a live-verification pass on a claim you can't prove from
   pytest alone.** Several real bugs in this project (a Postgres
   `ts_rank` weight-range error, a token-budget overflow against the
