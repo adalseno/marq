@@ -220,7 +220,7 @@ async def test_list_collections_and_status_gate_for_non_owner(
     gated_collection: Collection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("qmd_py.store.can_access", _owner_only_can_access())
+    monkeypatch.setattr("qmd_py.store._common.can_access", _owner_only_can_access())
 
     owner_rows = await list_collections(session, user)
     assert any(c.name == "gated" for c in owner_rows)
@@ -246,7 +246,7 @@ async def test_resolve_owned_collection_gates_rename_and_list_files_for_owner_de
     async def deny(*_args: object, **_kwargs: object) -> bool:
         return False
 
-    monkeypatch.setattr("qmd_py.store.can_access", deny)
+    monkeypatch.setattr("qmd_py.store._common.can_access", deny)
 
     with pytest.raises(PermissionDeniedError):
         await rename_collection(session, user, "gated", "renamed")

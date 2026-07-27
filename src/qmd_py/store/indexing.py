@@ -1,0 +1,178 @@
+"""Filesystem walk and reindex - backs `collection add` and `update`.
+Port of the TS reference's reindexCollection (src/store.ts).
+
+Deliberately omits the legacy handelize()/case-insensitive-path migration
+lookup (findOrMigrateLegacyDocument): that only existed to migrate very
+old SQLite indexes, which doesn't apply to a from-scratch project.
+"""
+
+import fnmatch
+import glob as glob_module
+import re
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from qmd_py.auth import CurrentUser
+from qmd_py.store._common import _resolve_owned_collection, extract_title, hash_content
+from qmd_py.store.cleanup import cleanup_orphaned_content
+from qmd_py.store.documents import (
+    deactivate_document,
+    find_document_by_path,
+    get_active_document_paths,
+    insert_content,
+    insert_document,
+    update_document,
+)
+
+_EXCLUDE_DIRS = frozenset({"node_modules", ".git", ".cache", "vendor", "dist", "build"})
+
+
+# Matches the leftmost *innermost* alternation group (the character class
+# excludes braces, so an outer `{a,{b,c}}` can't match until its inner group
+# has been expanded away).
+_BRACE_GROUP = re.compile(r"\{([^{}]+)\}")
+
+_MAX_BRACE_EXPANSIONS = 1000
+"""Ceiling on the expansion of one pattern. Groups multiply
+(`{a,b}/{c,d}/{e,f}` is 8 patterns, each its own filesystem walk), so a
+pathological pattern could otherwise turn `update` into a hang."""
+
+
+def _expand_braces(pattern: str) -> list[str]:
+    """Expands every `{a,b,c}` alternation group into the full cross
+    product - Python's glob has no brace-expansion support (that's a shell
+    feature), but our collection patterns (e.g. `{src,docs}/**/*.{py,md}`)
+    need it.
+
+    Expanding only the first group (as an earlier version did) left any
+    further group in the returned patterns as a literal `{...}`, which glob
+    matches against nothing - a collection with a two-group pattern
+    silently indexed zero files.
+
+    An unbalanced `{` has no group to match and is passed through
+    untouched, reaching glob as the literal character it already was.
+    """
+    match = _BRACE_GROUP.search(pattern)
+    if match is None:
+        return [pattern]
+
+    prefix, suffix = pattern[: match.start()], pattern[match.end() :]
+    expansions: list[str] = []
+    seen: set[str] = set()
+    for alternative in match.group(1).split(","):
+        # Recurse: `prefix + alternative + suffix` can still hold further
+        # groups, either alongside this one or nested inside it.
+        for expanded in _expand_braces(prefix + alternative + suffix):
+            if expanded in seen:
+                continue
+            seen.add(expanded)
+            expansions.append(expanded)
+            if len(expansions) >= _MAX_BRACE_EXPANSIONS:
+                return expansions
+    return expansions
+
+
+def _discover_files(
+    collection_path: str, pattern: str, ignore_patterns: list[str] | None
+) -> list[str]:
+    """Relative paths (glob-matched, hidden-file/dir and _EXCLUDE_DIRS
+    filtered) under `collection_path` - port of reindexCollection's
+    fast-glob call + hidden-file filter."""
+    root = Path(collection_path)
+    seen: set[str] = set()
+    files: list[str] = []
+    for expanded in _expand_braces(pattern):
+        for match in glob_module.glob(
+            expanded, root_dir=str(root), recursive=True, include_hidden=False
+        ):
+            rel_path = match
+            if rel_path in seen:
+                continue
+            parts = rel_path.split("/")
+            if any(p in _EXCLUDE_DIRS or p.startswith(".") for p in parts):
+                continue
+            if ignore_patterns and any(fnmatch.fnmatch(rel_path, ip) for ip in ignore_patterns):
+                continue
+            if not (root / rel_path).is_file():
+                continue
+            seen.add(rel_path)
+            files.append(rel_path)
+    return sorted(files)
+
+
+@dataclass
+class ReindexResult:
+    indexed: int
+    updated: int
+    unchanged: int
+    removed: int
+    orphaned_cleaned: int
+
+
+async def reindex_collection(
+    session: AsyncSession, user: CurrentUser, name: str
+) -> ReindexResult:
+    """Walk a collection's filesystem path, syncing `document`/`content`
+    to match what's on disk - backs `collection add` and `update`.
+
+    Simplification vs. the TS reference: a title-only change (same
+    content hash) is counted as "updated" here rather than its own
+    separate `updated`-for-title-only bucket - these are just informational
+    summary counts shown to the user, not load-bearing for correctness.
+    """
+    collection = await _resolve_owned_collection(session, user, name, "write")
+    files = _discover_files(collection.path, collection.pattern, collection.ignore_patterns)
+    root = Path(collection.path)
+    indexed = 0
+    updated = 0
+    unchanged = 0
+    seen_paths: set[str] = set()
+
+    for rel_path in files:
+        filepath = root / rel_path
+        try:
+            content = filepath.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if not content.strip():
+            continue
+        seen_paths.add(rel_path)
+
+        digest = hash_content(content)
+        title = extract_title(content, rel_path)
+        modified_at = datetime.fromtimestamp(filepath.stat().st_mtime, tz=UTC)
+
+        existing = await find_document_by_path(session, collection.id, rel_path)
+        if existing is not None:
+            if existing.active and existing.hash == digest and existing.title == title:
+                unchanged += 1
+                continue
+            if existing.hash != digest:
+                await insert_content(session, digest, content)
+            await update_document(session, existing, title, digest, modified_at)
+            updated += 1
+        else:
+            await insert_content(session, digest, content)
+            await insert_document(
+                session, collection.id, rel_path, title, digest, modified_at, modified_at
+            )
+            indexed += 1
+
+    removed = 0
+    for active_path in await get_active_document_paths(session, collection.id):
+        if active_path not in seen_paths:
+            await deactivate_document(session, collection.id, active_path)
+            removed += 1
+
+    orphaned = await cleanup_orphaned_content(session)
+
+    return ReindexResult(
+        indexed=indexed,
+        updated=updated,
+        unchanged=unchanged,
+        removed=removed,
+        orphaned_cleaned=orphaned,
+    )

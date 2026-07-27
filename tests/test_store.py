@@ -11,12 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from qmd_py.auth import CurrentUser
 from qmd_py.db.models import Document, User
 from qmd_py.store import (
-    _MAX_BRACE_EXPANSIONS,
     CollectionNotFoundError,
     PermissionDeniedError,
-    _discover_files,
-    _expand_braces,
-    _match_named_document,
     add_collection,
     add_context,
     cleanup_orphaned_content,
@@ -37,6 +33,11 @@ from qmd_py.store import (
     update_document,
     utcnow,
 )
+
+# Private helpers come from their own submodules rather than the package
+# facade, which re-exports only the public API.
+from qmd_py.store.indexing import _MAX_BRACE_EXPANSIONS, _discover_files, _expand_braces
+from qmd_py.store.retrieval import _match_named_document
 
 
 async def test_hash_content_matches_sha256() -> None:
@@ -320,7 +321,7 @@ async def test_permission_denied_surfaces_from_can_access(
     async def deny(*_args: object, **_kwargs: object) -> bool:
         return False
 
-    monkeypatch.setattr("qmd_py.store.can_access", deny)
+    monkeypatch.setattr("qmd_py.store._common.can_access", deny)
     with pytest.raises(PermissionDeniedError):
         await remove_collection(session, user, "guarded")
 
