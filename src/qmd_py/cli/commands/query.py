@@ -27,6 +27,8 @@ from qmd_py.search.fts import SearchResult
 from qmd_py.search.hybrid import (
     RERANK_CANDIDATE_LIMIT,
     HybridQueryResult,
+    ModelConfig,
+    QueryOptions,
     hybrid_query,
     parse_structured_query,
     validate_typed_queries,
@@ -235,17 +237,17 @@ async def _query_impl(
             user,
             display_query,
             llm_client,
-            settings.embed_model,
-            settings.generate_model,
-            settings.rerank_model,
-            limit=fetch_limit,
-            min_score=min_score,
-            candidate_limit=candidate_limit,
-            collection_name=single,
-            intent=effective_intent,
-            skip_rerank=skip_rerank,
-            explain=explain,
-            preexpanded=preexpanded,
+            ModelConfig.from_settings(settings),
+            QueryOptions(
+                limit=fetch_limit,
+                min_score=min_score,
+                candidate_limit=candidate_limit,
+                collection_name=single,
+                intent=effective_intent,
+                skip_rerank=skip_rerank,
+                explain=explain,
+                preexpanded=preexpanded,
+            ),
         )
 
     results = _filter_hybrid_by_collections(results, names)

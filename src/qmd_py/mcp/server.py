@@ -50,7 +50,13 @@ from qmd_py.cli.snippet import extract_snippet
 from qmd_py.config import get_settings
 from qmd_py.db.engine import get_session
 from qmd_py.llm.client import LlmClient
-from qmd_py.search.hybrid import ExpandedQuery, hybrid_query, validate_typed_queries
+from qmd_py.search.hybrid import (
+    ExpandedQuery,
+    ModelConfig,
+    QueryOptions,
+    hybrid_query,
+    validate_typed_queries,
+)
 from qmd_py.search.vector import get_vector_index_health
 from qmd_py.store import (
     DEFAULT_MULTI_GET_MAX_BYTES,
@@ -229,16 +235,16 @@ async def _run_query_search(
                 user,
                 primary_query,
                 llm_client,
-                settings.embed_model,
-                settings.generate_model,
-                settings.rerank_model,
-                limit=fetch_limit,
-                min_score=min_score,
-                candidate_limit=candidate_limit or 40,
-                collection_name=single,
-                intent=intent,
-                skip_rerank=not rerank,
-                preexpanded=preexpanded,
+                ModelConfig.from_settings(settings),
+                QueryOptions(
+                    limit=fetch_limit,
+                    min_score=min_score,
+                    candidate_limit=candidate_limit or 40,
+                    collection_name=single,
+                    intent=intent,
+                    skip_rerank=not rerank,
+                    preexpanded=preexpanded,
+                ),
             )
 
     results = _filter_by_collections(results, effective_collections)

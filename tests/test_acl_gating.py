@@ -45,7 +45,7 @@ from qmd_py.auth import CurrentUser
 from qmd_py.db.models import Collection
 from qmd_py.llm.client import LlmClient
 from qmd_py.search.fts import search_fts
-from qmd_py.search.hybrid import hybrid_query
+from qmd_py.search.hybrid import ModelConfig, QueryOptions, hybrid_query
 from qmd_py.search.vector import get_vector_index_health, search_vec
 from qmd_py.store import (
     DocumentNotFound,
@@ -159,8 +159,8 @@ async def test_resolve_collection_ids_gates_hybrid_query_for_non_owner(
         # without needing a live router.
         results = await hybrid_query(
             session, other_user, "fox", llm_client,
-            "bge-m3-q8_0", "unused-model", "unused-model",
-            collection_name="gated", skip_rerank=True,
+            ModelConfig("bge-m3-q8_0", "unused-model", "unused-model"),
+            QueryOptions(collection_name="gated", skip_rerank=True),
         )
         assert results == []
     finally:

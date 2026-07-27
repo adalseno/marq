@@ -22,7 +22,12 @@ from qmd_py.auth import CurrentUser
 from qmd_py.config import Settings
 from qmd_py.llm.client import LlmClient
 from qmd_py.search.fts import search_fts
-from qmd_py.search.hybrid import hybrid_query, parse_structured_query
+from qmd_py.search.hybrid import (
+    ModelConfig,
+    QueryOptions,
+    hybrid_query,
+    parse_structured_query,
+)
 from qmd_py.search.vector import search_vec
 
 # =============================================================================
@@ -265,14 +270,14 @@ async def _run_hybrid(
         user,
         display_query,
         llm_client,
-        settings.embed_model,
-        settings.generate_model,
-        settings.rerank_model,
-        limit=limit,
-        collection_name=collection,
-        intent=intent,
-        skip_rerank=not rerank,
-        preexpanded=preexpanded,
+        ModelConfig.from_settings(settings),
+        QueryOptions(
+            limit=limit,
+            collection_name=collection,
+            intent=intent,
+            skip_rerank=not rerank,
+            preexpanded=preexpanded,
+        ),
     )
     return [r.file for r in results]
 

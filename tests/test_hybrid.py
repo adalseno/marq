@@ -17,6 +17,8 @@ from qmd_py.db.models import Collection
 from qmd_py.llm.client import LlmClient
 from qmd_py.search.hybrid import (
     ExpandedQuery,
+    ModelConfig,
+    QueryOptions,
     RankedResult,
     expand_query,
     hybrid_query,
@@ -30,6 +32,7 @@ EMBED_MODEL = "bge-m3-q8_0"
 EMBED_DIM = 1024
 GENERATE_MODEL = "qwen2.5-3b-instruct-q4_k_m"
 RERANK_MODEL = "qwen3-reranker-0.6b-q8_0"
+_MODELS = ModelConfig(EMBED_MODEL, GENERATE_MODEL, RERANK_MODEL)
 
 
 # =============================================================================
@@ -297,11 +300,11 @@ async def test_hybrid_query_finds_relevant_doc(
         user,
         "how are tasks stored",
         llm_client,
-        EMBED_MODEL,
-        GENERATE_MODEL,
-        RERANK_MODEL,
-        collection_name="sample",
-        intent="understand task persistence",
+        _MODELS,
+        QueryOptions(
+            collection_name="sample",
+            intent="understand task persistence",
+        ),
     )
     assert results
     assert any(r.display_path.endswith("tasks.py") for r in results[:3])
@@ -317,11 +320,8 @@ async def test_hybrid_query_no_rerank_uses_rrf_position_score(
         user,
         "priority levels",
         llm_client,
-        EMBED_MODEL,
-        GENERATE_MODEL,
-        RERANK_MODEL,
-        collection_name="sample",
-        skip_rerank=True,
+        _MODELS,
+        QueryOptions(collection_name="sample", skip_rerank=True),
     )
     assert results
     # 1/rrf_rank scores: strictly descending, first is exactly 1.0.
@@ -339,12 +339,8 @@ async def test_hybrid_query_explain_populates_trace(
         user,
         "priority levels",
         llm_client,
-        EMBED_MODEL,
-        GENERATE_MODEL,
-        RERANK_MODEL,
-        collection_name="sample",
-        explain=True,
-        limit=3,
+        _MODELS,
+        QueryOptions(collection_name="sample", explain=True, limit=3),
     )
     assert results
     assert all(r.explain is not None for r in results)
@@ -362,14 +358,14 @@ async def test_hybrid_query_preexpanded_skips_automatic_expansion(
         user,
         "due date migration",
         llm_client,
-        EMBED_MODEL,
-        "not-a-real-model",
-        RERANK_MODEL,
-        collection_name="sample",
-        preexpanded=[
-            ExpandedQuery("lex", "due date migration"),
-            ExpandedQuery("vec", "schema changes over time"),
-        ],
+        ModelConfig(EMBED_MODEL, "not-a-real-model", RERANK_MODEL),
+        QueryOptions(
+            collection_name="sample",
+            preexpanded=[
+                ExpandedQuery("lex", "due date migration"),
+                ExpandedQuery("vec", "schema changes over time"),
+            ],
+        ),
     )
     assert results
     assert any("CHANGELOG" in r.display_path for r in results)
@@ -384,11 +380,7 @@ async def test_hybrid_query_min_score_filters_results(
         user,
         "priority levels",
         llm_client,
-        EMBED_MODEL,
-        GENERATE_MODEL,
-        RERANK_MODEL,
-        collection_name="sample",
-        skip_rerank=True,
-        min_score=0.99,
+        _MODELS,
+        QueryOptions(collection_name="sample", skip_rerank=True, min_score=0.99),
     )
     assert all(r.score >= 0.99 for r in results)

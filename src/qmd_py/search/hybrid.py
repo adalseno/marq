@@ -4,6 +4,8 @@ TS reference's hybridQuery/reciprocalRankFusion/expandQuery/rerank
 (src/store.ts).
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, replace
 from typing import Any
@@ -13,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmd_py.auth import CurrentUser
 from qmd_py.cli.snippet import extract_intent_terms
+from qmd_py.config import Settings
 from qmd_py.llm.client import LlmClient
 from qmd_py.search.fts import search_fts, validate_lex_query, validate_semantic_query
 from qmd_py.search.vector import chunk_document, search_vec
@@ -287,35 +290,73 @@ def _pick_best_chunk(
     return chunks[best_idx]
 
 
+@dataclass(frozen=True)
+class ModelConfig:
+    """The three router model slugs the hybrid pipeline needs. They always
+    travel together and always come from the same settings object, so
+    every call site used to thread the same three arguments through by
+    hand."""
+
+    embed: str
+    generate: str
+    rerank: str
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> ModelConfig:
+        return cls(
+            embed=settings.embed_model,
+            generate=settings.generate_model,
+            rerank=settings.rerank_model,
+        )
+
+
+@dataclass(frozen=True)
+class QueryOptions:
+    """Tunables for one hybrid query. Defaults match the previous
+    per-parameter defaults exactly, so `QueryOptions()` is the old
+    all-defaults call.
+
+    Bundled so adding a knob doesn't change `hybrid_query`'s signature and
+    every caller in turn - the CLI `query` command, the MCP `query` tool,
+    and the benchmark runner all build one of these.
+    """
+
+    limit: int = 10
+    min_score: float = 0.0
+    candidate_limit: int = RERANK_CANDIDATE_LIMIT
+    collection_name: str | None = None
+    intent: str | None = None
+    skip_rerank: bool = False
+    explain: bool = False
+    preexpanded: list[ExpandedQuery] | None = None
+    """Typed sub-queries the caller spelled out (the `lex:`/`vec:`/`hyde:`
+    document syntax, or the MCP tool's `searches`). When set, the BM25
+    strong-signal probe and `expand_query()` are skipped entirely, and -
+    since there's no single canonical "original" query left once the
+    caller has enumerated the sub-queries - no list gets the 2x
+    "original" RRF weight; every list is explicit and weighted 1x."""
+
+
 async def hybrid_query(
     session: AsyncSession,
     user: CurrentUser,
     query: str,
     llm_client: LlmClient,
-    embed_model: str,
-    generate_model: str,
-    rerank_model: str,
-    limit: int = 10,
-    min_score: float = 0.0,
-    candidate_limit: int = RERANK_CANDIDATE_LIMIT,
-    collection_name: str | None = None,
-    intent: str | None = None,
-    skip_rerank: bool = False,
-    explain: bool = False,
-    preexpanded: list[ExpandedQuery] | None = None,
+    models: ModelConfig,
+    options: QueryOptions | None = None,
 ) -> list[HybridQueryResult]:
     """BM25 + vector + query expansion + RRF + chunked reranking - port of
-    the TS reference's `hybridQuery`.
-
-    `preexpanded`, if given, is the CLI's structured multi-line query
-    syntax (`lex:`/`vec:`/`hyde:` prefixed lines - see
-    `parse_structured_query`) already parsed into typed sub-queries: skips
-    the BM25 strong-signal probe and `expand_query()` call entirely, and
-    (since there's no single canonical "original" query left once the
-    caller has spelled out the sub-queries themselves) none of the
-    resulting lists get the 2x "original" RRF weight - every list is
-    explicit and gets equal (1x) weight.
+    the TS reference's `hybridQuery`. See `QueryOptions` for the tunables.
     """
+    opts = options or QueryOptions()
+    # Unpacked once rather than referenced as `opts.x` throughout: keeps
+    # the pipeline below reading as it did before the options object.
+    embed_model, generate_model, rerank_model = models.embed, models.generate, models.rerank
+    limit, min_score = opts.limit, opts.min_score
+    candidate_limit, collection_name = opts.candidate_limit, opts.collection_name
+    intent, skip_rerank = opts.intent, opts.skip_rerank
+    explain, preexpanded = opts.explain, opts.preexpanded
+
     ranked_lists: list[list[RankedResult]] = []
     query_types: list[str] = []
     docid_map: dict[str, str] = {}
