@@ -13,11 +13,15 @@ actually works against real infrastructure.
 
 ## Docstring convention
 
-This codebase's docstrings are **narrative, decision-log prose**, not
-formal `Args:`/`Returns:`/`Examples:` API documentation. A typical
-module docstring explains *why* a design choice was made, what
-alternative was rejected and why, or what real bug shaped the current
-shape of the code — not a parameter-by-parameter contract.
+**Google style** (`docstring_style = "google"` in `zensical.toml`), with
+the narrative kept in front. `src/qmd_py/store/collection.py` is the
+worked reference — copy its shape.
+
+The primary content is still **decision-log prose**: what a typical
+docstring explains is *why* a design choice was made, what alternative
+was rejected and why, or what real bug shaped the current code. Google
+sections are **additive**, not a replacement — they exist for the few
+things prose states badly.
 
 For example (`src/qmd_py/config.py`'s actual docstring on
 `sqlalchemy_url`):
@@ -30,22 +34,53 @@ For example (`src/qmd_py/config.py`'s actual docstring on
 > the path, [it] proposed dropping [unrelated tables it shouldn't have
 > touched] ...
 
-This is deliberate, not an oversight: a contributor reading a function
-signature can already see its parameter types (this project is `mypy
---strict` end to end); what they *can't* see from the signature is why
-it's shaped the way it is, or what it would break to "simplify" it.
-Write new docstrings the same way — when you make a non-obvious choice,
-or fix a bug that wasn't obvious from the code alone, that's what the
-docstring is for.
+That preamble is the part that carries weight: a contributor reading a
+signature can already see the parameter types (this project is `mypy
+--strict` end to end); what they *can't* see is why it's shaped that way,
+or what it would break to "simplify" it. When you make a non-obvious
+choice, or fix a bug that wasn't obvious from the code alone, that's what
+the docstring is for.
 
-This is also why the [Code reference](../reference/store.md) pages
-(generated from these same docstrings via `mkdocstrings`) read the way
-they do: expect a design-rationale preamble plus the annotated source
-(`show_source = true` is intentional there, see `zensical.toml`), not a
-parameter table. If you're used to numpy/Google-style API docs, don't
-be surprised that these look different — it's the same tradeoff in
-reverse: optimized for *why*, not for a parameter reference mypy already
-gives you for free.
+### Which sections to use
+
+Three rules, in order of how much they matter:
+
+1. **Never put types in the docstring.** Write `name: Unique per owner`,
+   not `name (str): ...`. Everything is annotated and
+   `show_signature_annotations` renders the real signature, so a type in
+   prose is a second copy that mypy can't check and that drifts on the
+   first refactor.
+2. **`Raises:` almost always earns its place.** Which exception a caller
+   gets — and when — is the least guessable thing about these functions.
+   `CollectionNotFoundError` versus `PermissionDeniedError` depends on
+   whether the lookup prefiltered on ownership in SQL; an `IntegrityError`
+   on flush versus an up-front check is a real difference to the caller.
+3. **`Args:` is optional; `Returns:` is worth it for the dataclasses.**
+   `session`/`user` repeat on nearly every service function and
+   documenting them each time is noise — skip them and describe only the
+   arguments with something to say. `Returns:` earns its place where the
+   type name doesn't tell the whole story (`ReindexResult`,
+   `RemoveCollectionResult`), and `Attributes:` on the dataclass itself is
+   usually the better home for that detail.
+
+`Note:` is useful for the caveat that doesn't belong in the summary — a
+known N+1, or a behaviour that was once wrong in an interesting way.
+
+### Two things that will bite
+
+**Section names are exact, and indentation matters.** `Args:` and
+`Arguments:` both parse; `Params:` doesn't. A mis-indented section isn't
+an error — griffe just stops recognising it and renders it as ordinary
+prose, so it looks *almost* right. After writing your first few, build the
+docs and look at the page.
+
+**`zensical build --strict` is where malformed docstrings surface.** It
+passes today. Keep it that way — a sloppy section can break the docs build
+rather than degrading quietly.
+
+The [Code reference](../reference/store.md) pages are generated from these
+same docstrings, and show the annotated source alongside them
+(`show_source = true` is intentional — see `zensical.toml`).
 
 ## Adding a new CLI command
 
