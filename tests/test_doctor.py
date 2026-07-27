@@ -1,10 +1,19 @@
-"""Phase 10: doctor command unit tests - the pure helpers (URL redaction,
-alembic.ini discovery). The diagnostic checks themselves are exercised
-live (`uv run qmdpy doctor` against the dev container and the real
-server) rather than pytested, matching this project's established split
-for CLI commands (see tests/test_mcp.py's module docstring)."""
+"""Phase 10/11: doctor command unit tests - the pure helpers (URL
+redaction, alembic.ini discovery) plus _check_migrations()'s "no
+migrations applied" branch, which is directly testable against the
+`engine` fixture's schema (it never runs Alembic - see conftest.py -
+so it always looks alembic-unmigrated). The "up to date"/"pending
+migrations" branches need a schema Alembic actually migrated, which
+isn't this fixture's job; those stay covered by live verification
+(`uv run qmdpy doctor` / `uv run alembic check` against the dev
+container and the real server) rather than pytested, matching this
+project's established split for CLI commands (see tests/test_mcp.py's
+module docstring)."""
 
-from qmd_py.cli.commands.doctor import _find_alembic_ini, _redact_url
+import pytest
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from qmd_py.cli.commands.doctor import _check_migrations, _find_alembic_ini, _redact_url
 
 
 def test_redact_url_masks_password() -> None:
@@ -23,3 +32,10 @@ def test_find_alembic_ini_locates_project_root() -> None:
     assert ini_path is not None
     assert ini_path.name == "alembic.ini"
     assert ini_path.is_file()
+
+
+@pytest.mark.integration
+async def test_check_migrations_reports_none_applied_on_fresh_schema(engine: AsyncEngine) -> None:
+    ok, details = await _check_migrations(engine)
+    assert ok is False
+    assert "no migrations applied yet" in details

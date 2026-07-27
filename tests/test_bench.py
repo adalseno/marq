@@ -12,7 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmd_py.auth import CurrentUser
 from qmd_py.bench import (
+    BackendResult,
     BenchmarkQuery,
+    QueryResult,
+    _run_bm25,
+    _run_query,
+    bench_result_to_json,
+    format_bench_summary,
+    format_bench_table,
     load_fixture,
     normalize_path,
     paths_match,
@@ -123,3 +130,122 @@ async def test_run_benchmark_bm25_only_against_sample_collection(
     # The exact-keyword query should score perfectly on plain BM25.
     exact = next(r for r in result.results if r.id == "exact-http-api")
     assert exact.backends["bm25"].precision_at_k == 1.0
+
+
+@pytest.mark.integration
+async def test_run_benchmark_vector_and_full_backends_against_sample_collection(
+    session: AsyncSession, user: CurrentUser, llm_client: LlmClient, sample_collection: Collection
+) -> None:
+    from qmd_py.search.vector import embed_pending_documents
+
+    settings = get_settings()
+    await embed_pending_documents(session, user, llm_client, settings.embed_model, 1024)
+    await session.commit()
+
+    result = await run_benchmark(
+        session,
+        user,
+        llm_client,
+        settings,
+        "tests/fixtures/bench-sample-collection.json",
+        collection="sample",
+        backend_names=["vector", "hybrid", "full"],
+    )
+    assert len(result.results) == 6
+    assert all(
+        {"vector", "hybrid", "full"} <= set(r.backends) for r in result.results
+    )
+    assert {"vector", "hybrid", "full"} <= set(result.summary)
+
+
+@pytest.mark.integration
+async def test_run_bm25_structured_query_dedupes_across_lex_lines(
+    session: AsyncSession, user: CurrentUser, llm_client: LlmClient, sample_collection: Collection
+) -> None:
+    settings = get_settings()
+    query = BenchmarkQuery(
+        id="structured",
+        query="lex: due date\nlex: priority",
+        type="exact",
+        description="",
+        expected_files=["CHANGELOG.md"],
+        expected_in_top_k=3,
+    )
+    files = await _run_bm25(
+        session, user, llm_client, settings, query, limit=10, collection="sample"
+    )
+    # No duplicate file appears even though both lex lines can match the same doc.
+    assert len(files) == len(set(files))
+    assert any(f.endswith("CHANGELOG.md") for f in files)
+
+
+@pytest.mark.integration
+async def test_run_query_backend_exception_scores_zero_not_crash(
+    session: AsyncSession, user: CurrentUser, llm_client: LlmClient
+) -> None:
+    settings = get_settings()
+    query = BenchmarkQuery(
+        id="q", query="anything", type="exact", description="",
+        expected_files=["a.md"], expected_in_top_k=1,
+    )
+
+    async def broken_backend(*_args: object, **_kwargs: object) -> list[str]:
+        raise RuntimeError("backend unavailable")
+
+    result = await _run_query(session, user, llm_client, settings, broken_backend, query, None)
+    assert result.precision_at_k == 0
+    assert result.recall == 0
+    assert result.top_files == []
+    assert result.unmatched_expected_files == ["a.md"]
+
+
+def test_bench_result_to_json_roundtrips() -> None:
+    br = BackendResult(
+        precision_at_k=1.0, recall=1.0, recall_at_1=1.0, recall_at_3=1.0, recall_at_5=1.0,
+        mrr=1.0, f1=1.0, hits_at_k=1, total_expected=1, latency_ms=12.5,
+        top_files=["a.md"], matched_files=["a.md"], unmatched_expected_files=[],
+    )
+    qr = QueryResult(id="q1", query="test", type="exact", backends={"bm25": br})
+    from qmd_py.bench import BenchmarkResult
+
+    result = BenchmarkResult(
+        timestamp="20260101T000000", fixture="f.json", results=[qr],
+        summary={"bm25": {"avg_precision": 1.0}},
+    )
+    import json
+
+    parsed = json.loads(bench_result_to_json(result))
+    assert parsed["fixture"] == "f.json"
+    assert parsed["results"][0]["backends"]["bm25"]["precision_at_k"] == 1.0
+
+
+def test_format_bench_table_includes_query_and_backend_names() -> None:
+    br = BackendResult(
+        precision_at_k=1.0, recall=0.5, recall_at_1=1.0, recall_at_3=1.0, recall_at_5=1.0,
+        mrr=1.0, f1=0.67, hits_at_k=1, total_expected=2, latency_ms=42.0,
+        top_files=["a.md"], matched_files=["a.md"], unmatched_expected_files=["b.md"],
+    )
+    qr = QueryResult(id="my-query", query="test", type="exact", backends={"bm25": br})
+    table = format_bench_table([qr])
+    assert "my-query" in table
+    assert "bm25" in table
+    assert "42ms" in table
+
+
+def test_format_bench_summary_includes_backend_name_and_metrics() -> None:
+    summary = {
+        "bm25": {
+            "avg_precision": 0.5,
+            "avg_recall": 0.5,
+            "avg_recall_at_1": 0.5,
+            "avg_recall_at_3": 0.5,
+            "avg_recall_at_5": 0.5,
+            "avg_mrr": 0.5,
+            "avg_f1": 0.5,
+            "avg_latency_ms": 10.0,
+        }
+    }
+    out = format_bench_summary(summary)
+    assert "bm25" in out
+    assert "P@k=" in out
+    assert "Avg=10ms" in out
