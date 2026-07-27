@@ -2,7 +2,7 @@
 behind mcp/server.py's tools and dynamic instructions.
 
 Full protocol-level exercise (a real MCP ClientSession driving `query`/
-`get`/`multi_get`/`status` and the `qmd://` resource end to end) is
+`get`/`multi_get`/`status` and the `marq://` resource end to end) is
 deliberately NOT pytested here: `create_mcp_server()`'s tool handlers
 each open their own session via `db.engine.get_session()`, which is
 bound to whatever the environment's real settings point at (the dev
@@ -57,7 +57,7 @@ def test_filter_by_collections_noop_for_single_collection() -> None:
         def __init__(self, file: str) -> None:
             self.file = file
 
-    results = [R("qmd://a/x.md")]
+    results = [R("marq://a/x.md")]
     assert _filter_by_collections(results, ["a"]) == results
 
 
@@ -66,9 +66,9 @@ def test_filter_by_collections_filters_for_multiple() -> None:
         def __init__(self, file: str) -> None:
             self.file = file
 
-    results = [R("qmd://a/x.md"), R("qmd://b/y.md"), R("qmd://c/z.md")]
+    results = [R("marq://a/x.md"), R("marq://b/y.md"), R("marq://c/z.md")]
     filtered = _filter_by_collections(results, ["a", "b"])
-    assert [r.file for r in filtered] == ["qmd://a/x.md", "qmd://b/y.md"]
+    assert [r.file for r in filtered] == ["marq://a/x.md", "marq://b/y.md"]
 
 
 @pytest.mark.parametrize(
@@ -125,7 +125,7 @@ async def test_build_instructions_mentions_doc_count_and_collections(
     await session.commit()
 
     instructions = await build_instructions(session, user, "bge-m3-q8_0")
-    assert "1 markdown documents" in instructions
+    assert "1 documents" in instructions
     assert "notes" in instructions
     assert "No vector embeddings yet" in instructions
     assert "Search: Use `query`" in instructions

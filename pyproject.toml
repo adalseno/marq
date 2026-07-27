@@ -34,7 +34,7 @@ dev = [
 ]
 
 [project.scripts]
-qmdpy = "qmd_py.cli.main:main"
+marq = "qmd_py.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]

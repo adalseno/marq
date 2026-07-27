@@ -32,7 +32,7 @@ from qmd_py.llm.client import LlmClient
 
 
 def test_normalize_path_strips_qmd_scheme_and_collection() -> None:
-    assert normalize_path("qmd://sample/docs/readme.md") == "docs/readme.md"
+    assert normalize_path("marq://sample/docs/readme.md") == "docs/readme.md"
 
 
 def test_normalize_path_lowercases_and_strips_slashes() -> None:
@@ -44,8 +44,8 @@ def test_paths_match_exact() -> None:
 
 
 def test_paths_match_suffix() -> None:
-    assert paths_match("qmd://sample/docs/readme.md", "readme.md")
-    assert paths_match("readme.md", "qmd://sample/docs/readme.md")
+    assert paths_match("marq://sample/docs/readme.md", "readme.md")
+    assert paths_match("readme.md", "marq://sample/docs/readme.md")
 
 
 def test_paths_match_unrelated_files() -> None:

@@ -1,8 +1,8 @@
-"""`skill show`/`skill install` (the bundled qmdpy skill) and `skills
+"""`skill show`/`skill install` (the bundled marq skill) and `skills
 list/get/path` (generic bundled-skill discovery) - port of the TS
 reference's skill/skills CLI surface (src/cli/qmd.ts), scoped down: no
 Claude-symlink auto-detection/prompt flow on install (that's optional UX
-sugar, not core behavior) and no `QMD_SKILLS_DIR` override (see
+sugar, not core behavior) and no `MARQ_SKILLS_DIR` override (see
 skills/__init__.py's module docstring).
 """
 
@@ -20,7 +20,7 @@ from qmd_py.skills import (
     read_skill_content,
 )
 
-_SKILL_NAME = "qmdpy"
+_SKILL_NAME = "marq"
 
 
 def _install_dir(global_install: bool) -> Path:
@@ -31,30 +31,30 @@ def _install_dir(global_install: bool) -> Path:
 def _installed_stub_content() -> str:
     return f"""---
 name: {_SKILL_NAME}
-description: Bootstrap qmd-py search instructions from the installed qmdpy CLI.
+description: Bootstrap marq search instructions from the installed marq CLI.
   Use when users ask to find or retrieve notes, docs, or indexed local markdown.
 license: MIT
-compatibility: Requires the qmdpy CLI. Run `qmdpy skill show` for version-matched instructions.
-allowed-tools: Bash(qmdpy:*), mcp__qmd__*
+compatibility: Requires the marq CLI. Run `marq skill show` for version-matched instructions.
+allowed-tools: Bash(marq:*), mcp__marq__*
 ---
 
-# qmd-py - Query Markdown Documents
+# marq - centralized markdown/code search
 
 This installed skill is intentionally a small bootstrap so it does not go
-stale when the qmd-py package updates.
+stale when the marq package updates.
 
 Load the full, version-matched instructions from the CLI:
 
-!`qmdpy skill show`
+!`marq skill show`
 
 If your agent does not support bang-command expansion, run:
 
 ```bash
-qmdpy skill show
+marq skill show
 ```
 
 Then follow those instructions. In short: search first, fetch full sources
-with `qmdpy get` or `qmdpy multi-get`, and answer from retrieved text rather
+with `marq get` or `marq multi-get`, and answer from retrieved text rather
 than snippets.
 """
 
@@ -64,10 +64,10 @@ than snippets.
 @click.option("--global", "global_install", is_flag=True, help="Install to ~/.agents/skills")
 @click.option("--force", is_flag=True, help="Overwrite an existing install")
 def skill_command(action: str, global_install: bool, force: bool) -> None:
-    """Show or install the qmd-py skill (bootstrap instructions for agents)."""
+    """Show or install the marq skill (bootstrap instructions for agents)."""
     skill = find_skill(_SKILL_NAME)
     if skill is None:
-        raise click.ClickException("qmdpy skill not found (package installation issue).")
+        raise click.ClickException("marq skill not found (package installation issue).")
 
     if action == "show":
         content = read_skill_content(skill)
@@ -84,7 +84,7 @@ def skill_command(action: str, global_install: bool, force: bool) -> None:
 
     shutil.copytree(skill.dir, target_dir)
     (target_dir / "SKILL.md").write_text(_installed_stub_content(), encoding="utf-8")
-    click.echo(f"✓ Installed qmdpy skill to {target_dir}")
+    click.echo(f"✓ Installed marq skill to {target_dir}")
 
 
 def _output_json(payload: object) -> None:
@@ -142,7 +142,7 @@ def get_command(names: tuple[str, ...], full: bool, get_all: bool, json_mode: bo
             targets.append(skill)
 
     if not targets:
-        raise click.ClickException("No skill name provided. Usage: qmdpy skills get <name>")
+        raise click.ClickException("No skill name provided. Usage: marq skills get <name>")
 
     if json_mode:
         data = []

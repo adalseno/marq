@@ -43,7 +43,7 @@ from qmd_py.vpath import parse_virtual_path
 
 
 def _parse_context_path(path: str) -> tuple[str, str]:
-    if path.startswith("qmd://"):
+    if path.startswith("marq://"):
         parsed = parse_virtual_path(path)
         if parsed:
             return parsed
@@ -107,7 +107,7 @@ async def _collection_remove_impl(session: AsyncSession, user: CurrentUser, name
         await session.commit()
     except CollectionNotFoundError:
         click.echo(f"Collection not found: {name}", err=True)
-        click.echo("Run 'qmdpy collection list' to see available collections.", err=True)
+        click.echo("Run 'marq collection list' to see available collections.", err=True)
         raise SystemExit(1) from None
     click.echo(f"✓ Removed collection '{name}'")
     click.echo(f"  Deleted {result.deleted_docs} documents")
@@ -144,12 +144,12 @@ def collection_list_command() -> None:
 async def _collection_list_impl(session: AsyncSession, user: CurrentUser) -> None:
     rows = await list_collections(session, user)
     if not rows:
-        click.echo("No collections found. Run 'qmdpy collection add .' to create one.")
+        click.echo("No collections found. Run 'marq collection add .' to create one.")
         return
     click.echo(f"Collections ({len(rows)}):\n")
     for c in rows:
         excluded = "" if c.include_by_default else " [excluded]"
-        click.echo(f"{c.name} (qmd://{c.name}/){excluded}")
+        click.echo(f"{c.name} (marq://{c.name}/){excluded}")
         click.echo(f"  Pattern:  {c.pattern}")
         click.echo(f"  Files:    {c.active_count}")
         updated = c.last_modified.strftime("%Y-%m-%d") if c.last_modified else "never"
@@ -246,7 +246,7 @@ def update_command() -> None:
 async def _update_impl(session: AsyncSession, user: CurrentUser) -> None:
     rows = await list_collections(session, user)
     if not rows:
-        click.echo("No collections found. Run 'qmdpy collection add .' to index files.")
+        click.echo("No collections found. Run 'marq collection add .' to index files.")
         return
 
     click.echo(f"Updating {len(rows)} collection(s)...\n")
@@ -387,7 +387,7 @@ async def _context_add_impl(session: AsyncSession, user: CurrentUser, path: str,
     except CollectionNotFoundError:
         click.echo(f"Collection not found: {collection_name}", err=True)
         raise SystemExit(1) from None
-    click.echo(f"✓ Set context for qmd://{collection_name}/{path_prefix}")
+    click.echo(f"✓ Set context for marq://{collection_name}/{path_prefix}")
 
 
 @context_group.command("list")
@@ -405,7 +405,7 @@ async def _context_list_impl(session: AsyncSession, user: CurrentUser) -> None:
     if global_ctx:
         click.echo(f"Global: {global_ctx}\n")
     for r in rows:
-        label = f"qmd://{r.collection}/{r.path}" if r.path else f"qmd://{r.collection}/"
+        label = f"marq://{r.collection}/{r.path}" if r.path else f"marq://{r.collection}/"
         click.echo(f"{label}\n  {r.context}\n")
 
 
@@ -430,9 +430,9 @@ async def _context_rm_impl(session: AsyncSession, user: CurrentUser, path: str) 
         click.echo(f"Collection not found: {collection_name}", err=True)
         raise SystemExit(1) from None
     if removed:
-        click.echo(f"✓ Removed context for qmd://{collection_name}/{path_prefix}")
+        click.echo(f"✓ Removed context for marq://{collection_name}/{path_prefix}")
     else:
-        click.echo(f"No context found for qmd://{collection_name}/{path_prefix}", err=True)
+        click.echo(f"No context found for marq://{collection_name}/{path_prefix}", err=True)
         raise SystemExit(1)
 
 

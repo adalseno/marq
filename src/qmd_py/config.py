@@ -14,7 +14,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="QMD_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="MARQ_", env_file=".env", extra="ignore")
 
     postgres_url: str
     """postgresql+psycopg://user:pass@host/db - no search_path needed here,
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # exercised this setting and got a "model not found" error.
     generate_model: str = "qwen2.5-3b-instruct-q4_k_m"
 
-    default_user_email: str = "local@qmd-py.local"
+    default_user_email: str = "local@marq.local"
     """Identifies the single mocked user (see auth.py). Created on first use."""
 
     @property
@@ -63,5 +63,5 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Lazily constructed so importing this module doesn't require
-    QMD_POSTGRES_URL to already be set (e.g. during test collection)."""
+    MARQ_POSTGRES_URL to already be set (e.g. during test collection)."""
     return Settings()  # type: ignore[call-arg]  # postgres_url comes from env

@@ -87,7 +87,7 @@ def doctor_command() -> None:
 
 async def _doctor_impl() -> None:
     settings = get_settings()
-    click.echo("QMD-py Doctor\n")
+    click.echo("marq doctor\n")
     click.echo(f"Postgres schema: {settings.postgres_schema}")
     click.echo(f"LLM router: {settings.llm_base_url}\n")
 
@@ -132,7 +132,7 @@ async def _doctor_impl() -> None:
             else:
                 _check(
                     "Collections", False,
-                    "none configured. Next: `qmdpy collection add .`",
+                    "none configured. Next: `marq collection add .`",
                 )
         except Exception as exc:  # noqa: BLE001
             _check("Collections", False, str(exc))
@@ -142,12 +142,12 @@ async def _doctor_impl() -> None:
             if not health.has_vector_index:
                 _check(
                     "Vector index", False,
-                    f"no embeddings yet for {settings.embed_model}. Next: `qmdpy embed`",
+                    f"no embeddings yet for {settings.embed_model}. Next: `marq embed`",
                 )
             elif health.needs_embedding > 0:
                 _check(
                     "Vector index", False,
-                    f"{health.needs_embedding} document(s) need embedding. Next: `qmdpy embed`",
+                    f"{health.needs_embedding} document(s) need embedding. Next: `marq embed`",
                 )
             else:
                 _check("Vector index", True, f"{settings.embed_model} up to date")
@@ -171,10 +171,10 @@ async def _doctor_impl() -> None:
         _check("LLM router", False, f"unreachable: {exc}")
 
     click.echo("\nEffective configuration:")
-    click.echo(f"  QMD_POSTGRES_URL       {_redact_url(settings.postgres_url)}")
-    click.echo(f"  QMD_POSTGRES_SCHEMA    {settings.postgres_schema}")
-    click.echo(f"  QMD_LLM_BASE_URL       {settings.llm_base_url}")
-    click.echo(f"  QMD_EMBED_MODEL        {settings.embed_model}")
-    click.echo(f"  QMD_GENERATE_MODEL     {settings.generate_model}")
-    click.echo(f"  QMD_RERANK_MODEL       {settings.rerank_model}")
-    click.echo(f"  QMD_DEFAULT_USER_EMAIL {settings.default_user_email}")
+    click.echo(f"  MARQ_POSTGRES_URL       {_redact_url(settings.postgres_url)}")
+    click.echo(f"  MARQ_POSTGRES_SCHEMA    {settings.postgres_schema}")
+    click.echo(f"  MARQ_LLM_BASE_URL       {settings.llm_base_url}")
+    click.echo(f"  MARQ_EMBED_MODEL        {settings.embed_model}")
+    click.echo(f"  MARQ_GENERATE_MODEL     {settings.generate_model}")
+    click.echo(f"  MARQ_RERANK_MODEL       {settings.rerank_model}")
+    click.echo(f"  MARQ_DEFAULT_USER_EMAIL {settings.default_user_email}")

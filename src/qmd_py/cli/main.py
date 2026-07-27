@@ -1,4 +1,4 @@
-"""qmdpy CLI entry point.
+"""marq CLI entry point.
 
 Command groups are added phase by phase (see the project plan) - Phase 9
 adds the MCP server, Phase 10 adds bench/doctor/skill.
@@ -34,7 +34,7 @@ from qmd_py.cli.commands.write import (
 @click.group()
 @click.version_option()
 def cli() -> None:
-    """qmd-py: centralized markdown search over Postgres/pgvector."""
+    """marq: centralized markdown/code search over Postgres/pgvector."""
 
 
 cli.add_command(search_command)
@@ -59,7 +59,7 @@ cli.add_command(skills_group)
 
 def main() -> None:
     """Console-script entry point (see pyproject.toml) - wraps `cli()` so
-    a missing/invalid QMD_* setting turns into a short, actionable
+    a missing/invalid MARQ_* setting turns into a short, actionable
     message instead of a raw pydantic traceback. `get_settings()` is
     called lazily from deep inside individual commands' (often async)
     bodies, not once up front, so this outermost wrapper is the one
@@ -68,9 +68,9 @@ def main() -> None:
     try:
         cli()
     except ValidationError as exc:
-        click.echo("qmdpy: invalid or missing configuration", err=True)
+        click.echo("marq: invalid or missing configuration", err=True)
         for error in exc.errors():
-            env_var = f"QMD_{'.'.join(str(p) for p in error['loc']).upper()}"
+            env_var = f"MARQ_{'.'.join(str(p) for p in error['loc']).upper()}"
             click.echo(f"  {env_var}: {error['msg']}", err=True)
         click.echo(
             "\nSet these as environment variables or in a .env file in the "

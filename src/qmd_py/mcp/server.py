@@ -1,5 +1,5 @@
 """MCP server: FastMCP tools (`query`/`get`/`multi_get`/`status`) plus a
-raw `qmd://{path}` document resource - port of the TS reference's
+raw `marq://{path}` document resource - port of the TS reference's
 src/mcp/server.ts.
 
 Each tool/resource handler opens its own short-lived DB session (see
@@ -79,7 +79,7 @@ async def _default_collection_names(session: Any, user: CurrentUser) -> list[str
 def _filter_by_collections(results: list[Any], names: list[str]) -> list[Any]:
     if len(names) <= 1:
         return results
-    prefixes = tuple(f"qmd://{n}/" for n in names)
+    prefixes = tuple(f"marq://{n}/" for n in names)
     return [r for r in results if r.file.startswith(prefixes)]
 
 
@@ -95,7 +95,7 @@ async def build_instructions(session: Any, user: CurrentUser, embed_model: str) 
     global_ctx = await get_global_context(session, user)
     health = await get_vector_index_health(session, user, embed_model)
 
-    lines = [f"QMD is your local search engine over {status.total_documents} markdown documents."]
+    lines = [f"marq is your local search engine over {status.total_documents} documents."]
     if global_ctx:
         lines.append(f"Context: {global_ctx}")
 
@@ -111,13 +111,13 @@ async def build_instructions(session: Any, user: CurrentUser, embed_model: str) 
     if not health.has_vector_index:
         lines.append("")
         lines.append(
-            "Note: No vector embeddings yet. Run `qmdpy embed` to enable semantic search "
+            "Note: No vector embeddings yet. Run `marq embed` to enable semantic search "
             "(vec/hyde)."
         )
     elif health.needs_embedding > 0:
         lines.append("")
         lines.append(f"Note: {health.needs_embedding} documents need embedding. "
-                      "Run `qmdpy embed` to update.")
+                      "Run `marq embed` to update.")
 
     lines.append("")
     lines.append("Search: Use `query` with sub-queries (lex/vec/hyde):")
@@ -497,7 +497,7 @@ def _register_get_tool(mcp: FastMCP) -> None:
                 EmbeddedResource(
                     type="resource",
                     resource=TextResourceContents(
-                        uri=f"qmd://{_encode_qmd_path(result.display_path)}",  # type: ignore[arg-type]
+                        uri=f"marq://{_encode_qmd_path(result.display_path)}",  # type: ignore[arg-type]
                         mimeType="text/markdown",
                         text=text,
                     ),
@@ -572,7 +572,7 @@ def _register_multi_get_tool(mcp: FastMCP) -> None:
                 EmbeddedResource(
                     type="resource",
                     resource=TextResourceContents(
-                        uri=f"qmd://{_encode_qmd_path(r.display_path)}",  # type: ignore[arg-type]
+                        uri=f"marq://{_encode_qmd_path(r.display_path)}",  # type: ignore[arg-type]
                         mimeType="text/markdown",
                         text=r.body,
                     ),
@@ -602,7 +602,7 @@ def _register_status_tool(mcp: FastMCP, embed_model: str) -> None:
             health = await get_vector_index_health(session, user, embed_model)
 
         summary = [
-            "QMD Index Status:",
+            "marq Index Status:",
             f"  Total documents: {info.total_documents}",
             f"  Needs embedding: {health.needs_embedding}",
             f"  Vector index: {'yes' if health.has_vector_index else 'no'}",
@@ -633,7 +633,7 @@ def _register_status_tool(mcp: FastMCP, embed_model: str) -> None:
 
 
 # =============================================================================
-# Resource: qmd://{path} - see module docstring for why this bypasses
+# Resource: marq://{path} - see module docstring for why this bypasses
 # FastMCP's own @mcp.resource() decorator.
 # =============================================================================
 
@@ -642,7 +642,7 @@ def _register_document_resource(mcp: FastMCP) -> None:
     @mcp._mcp_server.read_resource()  # type: ignore[no-untyped-call,untyped-decorator]
     async def _read_resource(uri: Any) -> list[ReadResourceContents]:
         raw = str(uri)
-        path = raw[len("qmd://") :] if raw.startswith("qmd://") else raw
+        path = raw[len("marq://") :] if raw.startswith("marq://") else raw
         decoded_path = unquote(path)
 
         async with get_session() as session:
@@ -716,12 +716,12 @@ def _register_rest_routes(mcp: FastMCP, start_time: float) -> None:
             intent=intent,
             rerank=params["rerank"] if isinstance(params.get("rerank"), bool) else True,
         )
-        # The REST alias uses the full qmd:// URI for "file" - unlike the
+        # The REST alias uses the full marq:// URI for "file" - unlike the
         # `query` tool's bare display_path - matching the TS reference's
         # own (undocumented) discrepancy between its MCP tool and REST
         # endpoint output shapes.
         for item in items:
-            item["file"] = f"qmd://{_encode_qmd_path(str(item['file']))}"
+            item["file"] = f"marq://{_encode_qmd_path(str(item['file']))}"
         return JSONResponse({"results": items})
 
     mcp.custom_route("/query", methods=["POST"])(query_rest)
@@ -743,7 +743,7 @@ async def create_mcp_server(
         instructions = await build_instructions(session, user, settings.embed_model)
 
     mcp = FastMCP(
-        name="qmd", instructions=instructions, host=host, port=port, json_response=True
+        name="marq", instructions=instructions, host=host, port=port, json_response=True
     )
     # FastMCP's own constructor has no `version` parameter - it always
     # constructs its internal low-level Server with version=None, which

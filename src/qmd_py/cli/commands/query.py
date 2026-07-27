@@ -63,7 +63,7 @@ def _filter_hybrid_by_collections(
 ) -> list[HybridQueryResult]:
     if len(names) <= 1:
         return results
-    prefixes = tuple(f"qmd://{n}/" for n in names)
+    prefixes = tuple(f"marq://{n}/" for n in names)
     return [r for r in results if r.file.startswith(prefixes)]
 
 

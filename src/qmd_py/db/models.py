@@ -120,8 +120,8 @@ class Collection(SQLModel, table=True):
 
 class CollectionContext(SQLModel, table=True):
     """One row per (collection, path_prefix) context entry - `path_prefix`
-    is `""` for the collection root (`context add qmd://coll/` with no
-    sub-path), or a relative sub-path (`context add qmd://coll/notes`)."""
+    is `""` for the collection root (`context add marq://coll/` with no
+    sub-path), or a relative sub-path (`context add marq://coll/notes`)."""
 
     __table_args__ = (UniqueConstraint("collection_id", "path_prefix"),)
 

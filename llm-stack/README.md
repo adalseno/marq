@@ -1,8 +1,8 @@
 # Optional local LLM stack
 
-Entirely optional, for convenience - `qmd-py` has no local-model-loading
+Entirely optional, for convenience - `marq` has no local-model-loading
 concept at all (see `llm/client.py`); it's just a plain HTTP client
-against whatever `QMD_LLM_BASE_URL` points at. By default that's the real
+against whatever `MARQ_LLM_BASE_URL` points at. By default that's the real
 `ubuserver.internal` router. This lets you run an equivalent router
 locally instead (e.g. to work offline, or without depending on shared
 infrastructure) - there's no data-safety motivation like there is for the
@@ -16,7 +16,7 @@ Postgres container, since the LLM router holds no state of ours.
    - `qwen3-reranker-0.6b-q8_0.gguf` (reranking)
    - `qwen2.5-3b-instruct-q4_k_m.gguf` (query expansion/chat)
 2. Start it: `podman-compose --profile llm up -d llm`
-3. Point `.env` at it: `QMD_LLM_BASE_URL=http://localhost:8099`
+3. Point `.env` at it: `MARQ_LLM_BASE_URL=http://localhost:8099`
 
 ## GPU acceleration
 

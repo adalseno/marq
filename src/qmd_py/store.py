@@ -709,8 +709,8 @@ async def _active_document_refs(
 def _match_named_document(
     refs: list[tuple[Document, str]], name: str
 ) -> tuple[Document, str] | None:
-    """Exact virtual path (qmd://collection/path), then exact bare path,
-    then a suffix match against the full virtual path (`qmd://coll/path`,
+    """Exact virtual path (marq://collection/path), then exact bare path,
+    then a suffix match against the full virtual path (`marq://coll/path`,
     not just the bare path - so e.g. "sample/src/foo.py" or a partial
     "src/foo.py" both resolve) - in that order, first match wins, same as
     the TS reference's `findDocument`."""
@@ -726,7 +726,7 @@ def _match_named_document(
         if document.path == name:
             return document, coll_name
     for document, coll_name in refs:
-        if f"qmd://{coll_name}/{document.path}".endswith(name):
+        if f"marq://{coll_name}/{document.path}".endswith(name):
             return document, coll_name
     return None
 
@@ -772,7 +772,7 @@ async def _build_document_detail(
     body = await _document_body(session, document.hash)
     context = await get_context_for_path(session, user, document.collection_id, document.path)
     return DocumentDetail(
-        filepath=f"qmd://{collection_name}/{document.path}",
+        filepath=f"marq://{collection_name}/{document.path}",
         display_path=f"{collection_name}/{document.path}",
         title=document.title,
         context=context,
@@ -789,7 +789,7 @@ async def find_document(
     session: AsyncSession, user: CurrentUser, filename: str, collection_name: str | None = None
 ) -> DocumentDetail | DocumentNotFound:
     """Resolve a document by docid (`#abc123` or bare hex), virtual path
-    (`qmd://collection/path`), or bare path (exact match, then suffix
+    (`marq://collection/path`), or bare path (exact match, then suffix
     match) - port of the TS reference's `findDocument`."""
     collection_ids = await resolve_collection_ids(session, user, collection_name)
     if not collection_ids:
@@ -822,7 +822,7 @@ class GlobMatch:
 
 
 def _matches_pattern(document: Document, collection_name: str, pattern: str) -> bool:
-    virtual_path = f"qmd://{collection_name}/{document.path}"
+    virtual_path = f"marq://{collection_name}/{document.path}"
     collection_path = f"{collection_name}/{document.path}"
     return (
         fnmatch.fnmatchcase(virtual_path, pattern)
@@ -835,7 +835,7 @@ async def match_files_by_glob(
     session: AsyncSession, user: CurrentUser, pattern: str
 ) -> list[GlobMatch]:
     """Glob-match against three forms of every active, accessible
-    document's path (virtual `qmd://collection/path`, bare path, and
+    document's path (virtual `marq://collection/path`, bare path, and
     `collection/path`) - matches if any form matches, same as the TS
     reference's `matchFilesByGlob`. `display_path` is the bare relative
     path (not collection-prefixed), matching that function's own
@@ -848,7 +848,7 @@ async def match_files_by_glob(
             body_length = await _document_body_length(session, document.hash)
             matches.append(
                 GlobMatch(
-                    filepath=f"qmd://{coll_name}/{document.path}",
+                    filepath=f"marq://{coll_name}/{document.path}",
                     display_path=document.path,
                     body_length=body_length,
                 )
@@ -906,7 +906,7 @@ async def multi_get(
 
     results: list[MultiGetFile] = []
     for document, coll_name in matched:
-        filepath = f"qmd://{coll_name}/{document.path}"
+        filepath = f"marq://{coll_name}/{document.path}"
         display_path = f"{coll_name}/{document.path}"
         docid = get_docid(document.hash)
         context = await get_context_for_path(session, user, document.collection_id, document.path)
@@ -924,7 +924,7 @@ async def multi_get(
                     docid=docid,
                     skip_reason=(
                         f"File too large ({body_length // 1024}KB > {max_bytes // 1024}KB). "
-                        f"Use 'qmdpy get {display_path}' to retrieve."
+                        f"Use 'marq get {display_path}' to retrieve."
                     ),
                 )
             )

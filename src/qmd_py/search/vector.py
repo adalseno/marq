@@ -363,7 +363,7 @@ async def search_vec(
         context = await get_context_for_path(session, user, row.collection_id, row.path)
         results.append(
             SearchResult(
-                filepath=f"qmd://{name}/{row.path}",
+                filepath=f"marq://{name}/{row.path}",
                 display_path=f"{name}/{row.path}",
                 title=row.title,
                 hash=row.hash,

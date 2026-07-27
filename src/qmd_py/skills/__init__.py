@@ -4,7 +4,7 @@ qmd-py. Bundled skills live under `skills/bundled/` (package data,
 resolved via `importlib.resources` so this works whether qmd-py runs
 from a source checkout or an installed wheel) - port of the TS
 reference's discoverSkills/findSkill/parseSkillFrontmatter
-(src/cli/qmd.ts), scoped down: no external `QMD_SKILLS_DIR` search-path
+(src/cli/qmd.ts), scoped down: no external `MARQ_SKILLS_DIR` search-path
 override (qmd-py bundles exactly one skill today; that's a reasonable
 place to extend later, not something to build ahead of need).
 """

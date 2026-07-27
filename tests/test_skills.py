@@ -32,15 +32,15 @@ def test_parse_skill_frontmatter_missing_name_returns_none() -> None:
     assert parse_skill_frontmatter(content) is None
 
 
-def test_discover_skills_finds_bundled_qmdpy_skill() -> None:
+def test_discover_skills_finds_bundled_marq_skill() -> None:
     skills = discover_skills()
-    assert any(s.name == "qmdpy" for s in skills)
+    assert any(s.name == "marq" for s in skills)
 
 
 def test_find_skill_by_name() -> None:
-    skill = find_skill("qmdpy")
+    skill = find_skill("marq")
     assert skill is not None
-    assert skill.name == "qmdpy"
+    assert skill.name == "marq"
     assert (skill.dir / "SKILL.md").is_file()
 
 
@@ -49,15 +49,15 @@ def test_find_skill_missing_returns_none() -> None:
 
 
 def test_read_skill_content_matches_file() -> None:
-    skill = find_skill("qmdpy")
+    skill = find_skill("marq")
     assert skill is not None
     content = read_skill_content(skill)
     assert content.startswith("---")
-    assert "name: qmdpy" in content
+    assert "name: marq" in content
 
 
 def test_collect_skill_files_empty_for_bundled_skill() -> None:
-    # The bundled qmdpy skill has no references/templates/scripts subdirs.
-    skill = find_skill("qmdpy")
+    # The bundled marq skill has no references/templates/scripts subdirs.
+    skill = find_skill("marq")
     assert skill is not None
     assert collect_skill_files(skill) == []

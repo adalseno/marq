@@ -36,7 +36,7 @@ def test_main_reports_missing_config_and_exits_nonzero(
     assert exc_info.value.code == 1
     captured = capsys.readouterr()
     assert "invalid or missing configuration" in captured.err
-    assert "QMD_POSTGRES_URL" in captured.err
+    assert "MARQ_POSTGRES_URL" in captured.err
 
 
 def test_main_lets_other_exceptions_propagate(monkeypatch: pytest.MonkeyPatch) -> None:

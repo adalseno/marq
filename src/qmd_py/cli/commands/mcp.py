@@ -11,7 +11,7 @@ from pathlib import Path
 
 import click
 
-_STATE_DIR = Path.home() / ".cache" / "qmd-py"
+_STATE_DIR = Path.home() / ".cache" / "marq"
 _PID_FILE = _STATE_DIR / "mcp.pid"
 _LOG_FILE = _STATE_DIR / "mcp.log"
 
@@ -43,7 +43,7 @@ def _run_http(host: str, port: int) -> None:
 
     async def main() -> None:
         server = await create_mcp_server(http=True, host=host, port=port)
-        click.echo(f"QMD MCP server listening on http://{host}:{port}/mcp", err=True)
+        click.echo(f"marq MCP server listening on http://{host}:{port}/mcp", err=True)
         await server.run_streamable_http_async()
 
     anyio.run(main)

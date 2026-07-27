@@ -37,7 +37,7 @@ _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 def _result(**overrides: object) -> SearchResult:
     defaults: dict[str, object] = {
-        "filepath": "qmd://notes/a.md",
+        "filepath": "marq://notes/a.md",
         "display_path": "notes/a.md",
         "title": "A Doc",
         "hash": "abc123def456",
@@ -55,7 +55,7 @@ def _result(**overrides: object) -> SearchResult:
 
 def _multi_get_file(**overrides: object) -> MultiGetFile:
     defaults: dict[str, object] = {
-        "filepath": "qmd://notes/a.md",
+        "filepath": "marq://notes/a.md",
         "display_path": "notes/a.md",
         "title": "A Doc",
         "body": "hello world",
@@ -70,7 +70,7 @@ def _multi_get_file(**overrides: object) -> MultiGetFile:
 
 def _document_detail(**overrides: object) -> DocumentDetail:
     defaults: dict[str, object] = {
-        "filepath": "qmd://notes/a.md",
+        "filepath": "marq://notes/a.md",
         "display_path": "notes/a.md",
         "title": "A Doc",
         "context": None,

@@ -77,10 +77,10 @@ def load_fixture(path: str | Path) -> BenchmarkFixture:
 
 
 def normalize_path(path: str) -> str:
-    """qmd://collection/docs/readme.md -> docs/readme.md; lowercased,
+    """marq://collection/docs/readme.md -> docs/readme.md; lowercased,
     stripped of leading/trailing slashes."""
-    if path.startswith("qmd://"):
-        without_scheme = path[len("qmd://") :]
+    if path.startswith("marq://"):
+        without_scheme = path[len("marq://") :]
         slash_idx = without_scheme.find("/")
         path = without_scheme[slash_idx + 1 :] if slash_idx >= 0 else without_scheme
     return path.lower().strip("/")

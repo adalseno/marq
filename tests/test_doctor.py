@@ -5,7 +5,7 @@ migrations applied" branch, which is directly testable against the
 so it always looks alembic-unmigrated). The "up to date"/"pending
 migrations" branches need a schema Alembic actually migrated, which
 isn't this fixture's job; those stay covered by live verification
-(`uv run qmdpy doctor` / `uv run alembic check` against the dev
+(`uv run marq doctor` / `uv run alembic check` against the dev
 container and the real server) rather than pytested, matching this
 project's established split for CLI commands (see tests/test_mcp.py's
 module docstring)."""

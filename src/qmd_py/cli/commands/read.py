@@ -96,7 +96,7 @@ def _filter_by_collections(results: list[SearchResult], names: list[str]) -> lis
     already scoped to it; multiple names filter the combined result set."""
     if len(names) <= 1:
         return results
-    prefixes = tuple(f"qmd://{n}/" for n in names)
+    prefixes = tuple(f"marq://{n}/" for n in names)
     return [r for r in results if r.filepath.startswith(prefixes)]
 
 
@@ -316,7 +316,7 @@ async def _get_impl(
                 click.echo(f"  {similar}", err=True)
         raise SystemExit(1)
 
-    canonical_path = f"qmd://{doc.display_path}"
+    canonical_path = f"marq://{doc.display_path}"
     header = f"{canonical_path}  #{doc.docid}"
 
     output = doc.body
@@ -410,14 +410,14 @@ async def _ls_impl(session: AsyncSession, user: CurrentUser, path_arg: str | Non
     if not path_arg:
         collections = await list_collections(session, user)
         if not collections:
-            click.echo("No collections found. Run 'qmdpy collection add .' to index files.")
+            click.echo("No collections found. Run 'marq collection add .' to index files.")
             return
         click.echo("Collections:")
         for c in collections:
-            click.echo(f"  qmd://{c.name}/  ({c.active_count} files)")
+            click.echo(f"  marq://{c.name}/  ({c.active_count} files)")
         return
 
-    if path_arg.startswith("qmd://"):
+    if path_arg.startswith("marq://"):
         parsed = parse_virtual_path(path_arg)
         collection_name, path_prefix = parsed if parsed else (path_arg, "")
     else:
@@ -428,12 +428,12 @@ async def _ls_impl(session: AsyncSession, user: CurrentUser, path_arg: str | Non
         files = await list_files(session, user, collection_name, path_prefix or None)
     except CollectionNotFoundError:
         click.echo(f"Collection not found: {collection_name}", err=True)
-        click.echo("Run 'qmdpy ls' to see available collections.", err=True)
+        click.echo("Run 'marq ls' to see available collections.", err=True)
         raise SystemExit(1) from None
 
     if not files:
         if path_prefix:
-            click.echo(f"No files found under qmd://{collection_name}/{path_prefix}")
+            click.echo(f"No files found under marq://{collection_name}/{path_prefix}")
         else:
             click.echo(f"No files found in collection: {collection_name}")
         return
@@ -441,7 +441,7 @@ async def _ls_impl(session: AsyncSession, user: CurrentUser, path_arg: str | Non
     for f in files:
         size_str = f"{f.size}B" if f.size < 1024 else f"{f.size / 1024:.1f}KB"
         when = f.modified_at.strftime("%Y-%m-%d %H:%M")
-        click.echo(f"  {size_str:>8}  {when}  qmd://{collection_name}/{f.path}")
+        click.echo(f"  {size_str:>8}  {when}  marq://{collection_name}/{f.path}")
 
 
 # =============================================================================
@@ -457,14 +457,14 @@ def status_command() -> None:
 
 async def _status_impl(session: AsyncSession, user: CurrentUser) -> None:
     status = await get_status(session, user)
-    click.echo("QMD Status\n")
+    click.echo("marq Status\n")
     click.echo(f"Documents\n  Total: {status.total_documents} files indexed\n")
     if not status.collections:
-        click.echo("No collections found. Run 'qmdpy collection add .' to index files.")
+        click.echo("No collections found. Run 'marq collection add .' to index files.")
         return
     click.echo("Collections:")
     for c in status.collections:
         updated = c.last_updated.strftime("%Y-%m-%d") if c.last_updated else "never"
-        click.echo(f"  {c.name} (qmd://{c.name}/)")
+        click.echo(f"  {c.name} (marq://{c.name}/)")
         click.echo(f"    Pattern:  {c.pattern}")
         click.echo(f"    Files:    {c.doc_count} (updated {updated})")

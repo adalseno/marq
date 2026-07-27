@@ -43,7 +43,7 @@ async def test_find_document_by_exact_virtual_path(
     session: AsyncSession, user: CurrentUser
 ) -> None:
     await _seed(session, user)
-    result = await find_document(session, user, "qmd://docs/notes/alpha.md")
+    result = await find_document(session, user, "marq://docs/notes/alpha.md")
     assert isinstance(result, DocumentDetail)
     assert result.display_path == "docs/notes/alpha.md"
     assert result.body == "alpha body content"
@@ -62,7 +62,7 @@ async def test_find_document_by_collection_prefixed_display_path(
     session: AsyncSession, user: CurrentUser
 ) -> None:
     """Regression test: the suffix match must compare against the full
-    virtual path (qmd://collection/path), not just the bare document
+    virtual path (marq://collection/path), not just the bare document
     path, so a "collection/path" display-form lookup (as printed by
     search/ls/multi-get) resolves too."""
     await _seed(session, user)

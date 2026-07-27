@@ -1,6 +1,6 @@
 """Phase 5: chunking/table-naming unit tests + embed_pending_documents/
 search_vec integration tests against a real scratch Postgres schema and
-the real llama.cpp router (QMD_LLM_BASE_URL) - there's no local/mock LLM
+the real llama.cpp router (MARQ_LLM_BASE_URL) - there's no local/mock LLM
 story for this project (see the plan's "pure HTTP client" decision), so
 these necessarily hit the real embedding endpoint.
 """
