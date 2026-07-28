@@ -90,6 +90,8 @@ required; see `.env.example` for a production-style template or
 | `MARQ_GENERATE_MODEL`     | `qwen2.5-3b-instruct-q4_k_m`       | Used for query expansion                 |
 | `MARQ_RERANK_MODEL`       | `qwen3-reranker-0.6b-q8_0`         |                                            |
 | `MARQ_DEFAULT_USER_EMAIL` | `local@marq.local`                 | Single mocked user (see Architecture)    |
+| `MARQ_LOG_LEVEL`          | `WARNING`                          | Silent on a healthy run; `-v`/`-vv` override |
+| `MARQ_LOG_FILE`           | *(unset — stderr)*                 | Size-rotated file; never stdout          |
 
 Running any command without `MARQ_POSTGRES_URL` set prints a short
 "invalid or missing configuration" message naming the missing variable,

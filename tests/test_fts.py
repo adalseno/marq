@@ -153,6 +153,29 @@ async def test_search_fts_finds_indexed_document(
 
 
 @pytest.mark.integration
+async def test_search_fts_returns_nothing_for_an_all_stopword_query(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """`build_ts_query` happily produces "the:* & of:*", but Postgres's
+    english dictionary reduces both to nothing: to_tsquery emits a NOTICE
+    and yields an empty query, which matches no document. Correct
+    behavior, live-confirmed during the third review and pinned here so a
+    future tsquery change can't turn it into an error or a match-all."""
+    collection = await add_collection(session, user, "stopwords", "/tmp/stopwords")
+    await insert_content(session, "hashs", "the quick brown fox jumps over the lazy dog")
+    await insert_document(
+        session, collection.id, "fox.md", "Fox", "hashs", utcnow(), utcnow()
+    )
+    await session.commit()
+
+    assert build_ts_query("the of") == "the:* & of:*"
+    assert await search_fts(session, user, "the of") == []
+    # The same document is findable by a non-stopword term, so the empty
+    # result is the query's doing, not a broken fixture.
+    assert len(await search_fts(session, user, "brown fox")) == 1
+
+
+@pytest.mark.integration
 async def test_search_fts_respects_collection_filter(
     session: AsyncSession, user: CurrentUser
 ) -> None:

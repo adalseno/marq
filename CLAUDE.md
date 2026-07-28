@@ -172,6 +172,18 @@ required; `MARQ_LLM_BASE_URL` can point anywhere OpenAI-endpoint-shaped.
   registered against the low-level `mcp._mcp_server` directly (bypassing
   FastMCP's own `@mcp.resource()` decorator, whose template matching
   can't express a slash-spanning path segment).
+- **Logging**: stdlib `logging` under one `qmd_py` logger hierarchy
+  (`src/qmd_py/log.py`), configured from `MARQ_LOG_LEVEL`/`MARQ_LOG_FILE`
+  at exactly two wire-up points (`cli/main.py`'s group callback and
+  `create_mcp_server()`), with `-v`/`-vv` as the per-invocation override.
+  Two rules the module enforces: **never stdout** (the CLI's stdout is
+  parseable output, the MCP stdio transport is JSON-RPC over stdout), and
+  **log shapes, not content** — counts/paths/durations/exception types at
+  WARNING and INFO, never queries or document bodies (content is DEBUG
+  only). The default WARNING level is silent on a healthy run, so a
+  non-empty log means something actually degraded. `create_mcp_server()`
+  sets `propagate = False` because FastMCP calls `basicConfig()` with a
+  RichHandler on the root logger.
 - **Python package name stays `qmd_py`** (distribution `qmd-py`) even
   though the CLI/MCP product surface is branded `marq` — the package
   name is an internal implementation detail no CLI/MCP user ever sees;

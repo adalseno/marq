@@ -17,7 +17,7 @@ $ marq mcp stop                     # stop the background daemon
 ```console
 $ marq mcp --http --daemon --port 8891
 MCP daemon started (pid 1068308), listening on http://127.0.0.1:8891/mcp
-Logs: /home/andrea/.cache/marq/mcp.log
+Logs: /home/andrea/.cache/marq/marq.log (level INFO)
 
 $ curl -s http://127.0.0.1:8891/health
 {"status":"ok","uptime":0}
@@ -26,10 +26,35 @@ $ marq mcp stop
 Stopped MCP daemon (pid 1068308).
 ```
 
-`--daemon` writes its PID and logs under `~/.cache/marq/` (`mcp.pid`,
-`mcp.log`); `mcp stop` reads the PID file, sends `SIGTERM`, and cleans
-it up — including a stale PID file left behind if the process had
-already died.
+`--daemon` writes its PID and logs under `~/.cache/marq/`:
+
+- `mcp.pid` — read by `mcp stop`, which sends `SIGTERM` and cleans it
+  up, including a stale PID file left behind if the process had already
+  died.
+- `marq.log` — the daemon's own log, size-rotated (5 MB, 3 backups) and
+  at `INFO` by default, so a server running for weeks can't fill the
+  disk. `MARQ_LOG_LEVEL`/`MARQ_LOG_FILE` override both if set; see
+  [Configuration](configuration.md#marq_log_level).
+- `mcp-stdio.log` — anything the process writes outside the logging
+  system (a startup traceback, uvicorn's own banner). Truncated at each
+  start.
+
+At `INFO` the log carries one line per request, correlated by a short
+id so concurrent tool calls stay followable:
+
+```text
+2026-07-28 16:56:34,613 WARNING qmd_py.mcp.server [rest-3f3ad5] REST /query rejected: 'searches' is str, expected array
+2026-07-28 16:56:34,614 INFO    qmd_py.mcp.server [rest-3f3ad5] POST /query: status=400 2ms
+2026-07-28 16:56:34,749 INFO    qmd_py.search.hybrid [rest-99ce16] query: subqueries=3 candidates=40 reranked=yes results=9 812ms
+```
+
+Note what is *not* there: no query text and no document content. Those
+are logged only at `DEBUG` — see the privacy note in
+[Configuration](configuration.md#marq_log_file).
+
+If you bind a non-loopback `--host`, the server warns at startup: the
+HTTP transport has no authentication yet, so anyone who can reach the
+port can read every indexed document.
 
 ## Tools
 
