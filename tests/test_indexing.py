@@ -206,7 +206,31 @@ async def test_reindex_collection_skips_and_counts_oversized_files(
     assert await get_active_document_paths(session, collection.id) == ["good.md"]
 
 
-async def test_reindex_collection_logs_a_warning_per_skipped_file(
+async def test_reindex_oversize_cap_measures_bytes_not_characters(
+    tmp_path: Path, session: AsyncSession, user: CurrentUser
+) -> None:
+    """Live-confirmed gap in the original character-count cap: Postgres's
+    tsvector limit is a *byte* limit, and multibyte text (Cyrillic here,
+    two UTF-8 bytes per letter) blows it well under a million characters.
+    Such a file used to pass the cap and abort the whole reindex with a
+    raw ProgramLimitExceeded from to_tsvector."""
+    multibyte = "# Huge\n\n" + " ".join(f"сло{n}ва" for n in range(80_000))
+    assert len(multibyte) < 1_000_000
+    assert len(multibyte.encode("utf-8")) > 1_000_000
+    (tmp_path / "good.md").write_text("# Good\n\nreal body")
+    (tmp_path / "cyrillic.md").write_text(multibyte)
+    collection = await add_collection(session, user, "bytecap", str(tmp_path), "**/*.md")
+    await session.commit()
+
+    result = await reindex_collection(session, user, "bytecap")
+    await session.commit()
+
+    assert result.indexed == 1
+    assert result.skipped_oversize == 1
+    assert await get_active_document_paths(session, collection.id) == ["good.md"]
+
+
+async def test_reindex_collection_logs_each_skipped_file_at_the_right_level(
     tmp_path: Path,
     session: AsyncSession,
     user: CurrentUser,
@@ -214,7 +238,11 @@ async def test_reindex_collection_logs_a_warning_per_skipped_file(
 ) -> None:
     """Skipped files are the reindexer's silent degrade path - a document
     missing from search results with no explanation anywhere. Each skip
-    logs its path and reason once."""
+    logs its path and reason once, but at a level matching what it means:
+    unreadable and oversized files WARN (something is actually missing
+    from the index), while an empty file is a normal state (an
+    __init__.py, a placeholder note) that must stay below WARNING or
+    every healthy reindex of an ordinary collection would be noisy."""
     (tmp_path / "good.md").write_text("# Good\n\nreal body")
     (tmp_path / "binary.md").write_bytes(b"\xff\xfe\x00binary garbage")
     (tmp_path / "blank.md").write_text("   \n\n  ")
@@ -222,15 +250,19 @@ async def test_reindex_collection_logs_a_warning_per_skipped_file(
     await add_collection(session, user, "noisy", str(tmp_path), "**/*.md")
     await session.commit()
 
-    with caplog.at_level(logging.WARNING, logger="qmd_py.store.indexing"):
+    with caplog.at_level(logging.DEBUG, logger="qmd_py.store.indexing"):
         await reindex_collection(session, user, "noisy")
     await session.commit()
 
-    assert "skipping binary.md: UnicodeDecodeError" in caplog.text
-    assert "skipping blank.md: file is empty or whitespace-only" in caplog.text
-    assert "skipping huge.md" in caplog.text
-    assert "exceeds the 1000000-char index limit" in caplog.text
-    assert "good.md" not in caplog.text
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    debugs = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+    assert any("skipping binary.md: UnicodeDecodeError" in m for m in warnings)
+    assert any(
+        "skipping huge.md" in m and "exceeds the 1000000-byte index limit" in m for m in warnings
+    )
+    assert not any("blank.md" in m for m in warnings)
+    assert any("skipping blank.md: file is empty or whitespace-only" in m for m in debugs)
+    assert not any("good.md" in m for m in warnings + debugs)
 
 
 async def test_reindex_collection_shares_content_between_duplicate_files(

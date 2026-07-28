@@ -88,8 +88,23 @@ async def _collection_add_impl(
         click.echo("Use a different name with --name <name>", err=True)
         raise SystemExit(1) from None
 
-    result = await reindex_collection(session, user, name)
-    await session.commit()
+    try:
+        result = await reindex_collection(session, user, name)
+        await session.commit()
+    except (OSError, SQLAlchemyError) as exc:
+        # The collection row is committed before the reindex, so a crash
+        # here would leave a committed, empty collection behind - and a
+        # retry would then be told "already exists. Use a different
+        # name", which is exactly wrong. Undo the creation instead.
+        await session.rollback()
+        logger.warning(
+            "initial reindex of collection %s failed: %s: %s", name, type(exc).__name__, exc
+        )
+        await remove_collection(session, user, name)
+        await session.commit()
+        click.echo(f"✗ Indexing failed: {exc}", err=True)
+        click.echo(f"Collection '{name}' was not created.", err=True)
+        raise SystemExit(1) from None
     click.echo(f"✓ Collection '{name}' created successfully")
     click.echo(
         f"  Indexed: {result.indexed} new, {result.updated} updated, "

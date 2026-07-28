@@ -390,6 +390,33 @@ def test_update_continues_past_a_database_error_in_one_collection(
     assert "unique-fresh-token" in marq("search", "unique-fresh-token").output
 
 
+def test_collection_add_undoes_the_collection_when_indexing_fails(
+    marq: Marq, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The collection row is committed before the reindex, so a reindex
+    crash used to leave a committed, empty collection behind - and the
+    retry was then told "already exists. Use a different name", which is
+    exactly wrong. A failed add must remove the row so a retry with the
+    same name actually retries."""
+    import qmd_py.cli.commands.write as write_module
+
+    _write_collection(tmp_path)
+
+    async def failing_reindex(session: object, user: object, name: str) -> object:
+        raise SQLAlchemyError("string is too long for tsvector")
+
+    monkeypatch.setattr(write_module, "reindex_collection", failing_reindex)
+    result = marq("collection", "add", str(tmp_path), "--name", "doomed", "--mask", "**/*.md")
+    monkeypatch.undo()
+
+    assert result.exit_code == 1, result.output
+    assert "was not created" in result.output
+
+    retry = marq("collection", "add", str(tmp_path), "--name", "doomed", "--mask", "**/*.md")
+    assert retry.exit_code == 0, retry.output
+    assert "created successfully" in retry.output
+
+
 def test_collection_add_reports_oversized_skips(marq: Marq, tmp_path: Path) -> None:
     (tmp_path / "small.md").write_text("# Small\n\nfine\n")
     (tmp_path / "huge.md").write_text("# Huge\n\n" + "tok ".join(str(n) for n in range(300_000)))

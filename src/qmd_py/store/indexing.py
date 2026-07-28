@@ -33,14 +33,17 @@ logger = logging.getLogger(__name__)
 
 _EXCLUDE_DIRS = frozenset({"node_modules", ".git", ".cache", "vendor", "dist", "build"})
 
-MAX_INDEXABLE_CHARS = 1_000_000
-"""Documents longer than this are skipped at index time (soft-skip, counted
-in `ReindexResult.skipped_oversize`), the same convention `multi_get`'s
-`max_bytes` uses. The line sits where Postgres draws it: a tsvector caps at
-1 MiB, and a distinct-token-heavy file (log dump, minified code) crosses
-that well under 2 MB of source text - feeding it through would abort the
-whole reindex with a raw `ProgrammingError`. Even a document that squeaked
-under the tsvector cap would only degrade search quality anyway."""
+MAX_INDEXABLE_BYTES = 1_000_000
+"""Documents whose UTF-8 encoding exceeds this are skipped at index time
+(soft-skip, counted in `ReindexResult.skipped_oversize`), the same
+convention `multi_get`'s `max_bytes` uses. The line sits where Postgres
+draws it: a tsvector caps at 1 MiB, and a distinct-token-heavy file (log
+dump, minified code) crosses that well under 2 MB of source text -
+feeding it through would abort the whole reindex with a raw
+`ProgrammingError`. Bytes, not characters: the tsvector cap is a byte
+limit, and multibyte text (Cyrillic, CJK) blows it well under a million
+characters. Even a document that squeaked under the tsvector cap would
+only degrade search quality anyway."""
 
 
 # Matches the leftmost *innermost* alternation group (the character class
@@ -136,7 +139,7 @@ class ReindexResult:
             disk. Deactivated, not deleted - `marq cleanup` reclaims them.
         orphaned_cleaned: Content rows dropped because no document, active
             or inactive, still referenced them.
-        skipped_oversize: Files skipped for exceeding `MAX_INDEXABLE_CHARS`
+        skipped_oversize: Files skipped for exceeding `MAX_INDEXABLE_BYTES`
             - the one skip reason that gets its own visible count, because
             silently dropping a legitimate (if huge) file from the index
             would otherwise look like a search bug.
@@ -167,12 +170,16 @@ async def reindex_collection(
     Simplification vs. the TS reference: a title-only change (same content
     hash) counts as `updated` rather than getting its own bucket.
 
-    Files are skipped silently, not reported, in three cases: unreadable
-    or non-UTF-8 bytes, whitespace-only content, and anything excluded by
-    the collection's pattern or ignore rules. A fourth case is skipped but
-    *counted*: files over `MAX_INDEXABLE_CHARS` (see `skipped_oversize`).
-    A previously indexed file that has since crossed the cap is treated
-    like any other skipped file - its document is deactivated.
+    A skipped file never aborts the run. Unreadable or non-UTF-8 files
+    are skipped with a WARNING; whitespace-only files with a DEBUG line
+    (an empty `__init__.py` is a normal state, not a degrade - anything
+    louder would break the healthy-run-is-silent contract on every
+    reindex of an ordinary code collection); files excluded by the
+    collection's pattern or ignore rules, silently. One case is *counted*
+    as well as logged: files over `MAX_INDEXABLE_BYTES` (see
+    `skipped_oversize`). A previously indexed file that has since crossed
+    the cap is treated like any other skipped file - its document is
+    deactivated.
 
     Args:
         name: Collection name, resolved against `user`'s own collections.
@@ -231,15 +238,19 @@ async def _reindex_collection_impl(
             logger.warning("skipping %s: %s: %s", rel_path, type(exc).__name__, exc)
             continue
         if not content.strip():
-            logger.warning("skipping %s: file is empty or whitespace-only", rel_path)
+            # DEBUG, not WARNING: an empty file is a normal state (an
+            # __init__.py, a placeholder note), and a WARNING here would
+            # repeat on every reindex of a healthy collection.
+            logger.debug("skipping %s: file is empty or whitespace-only", rel_path)
             continue
-        if len(content) > MAX_INDEXABLE_CHARS:
+        size_bytes = len(content.encode("utf-8"))
+        if size_bytes > MAX_INDEXABLE_BYTES:
             skipped_oversize += 1
             logger.warning(
-                "skipping %s: %d chars exceeds the %d-char index limit",
+                "skipping %s: %d bytes exceeds the %d-byte index limit",
                 rel_path,
-                len(content),
-                MAX_INDEXABLE_CHARS,
+                size_bytes,
+                MAX_INDEXABLE_BYTES,
             )
             continue
         seen_paths.add(rel_path)

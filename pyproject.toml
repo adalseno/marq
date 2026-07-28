@@ -26,7 +26,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
+    # >=8.4: caplog must capture through the non-propagating qmd_py logger
+    # (create_mcp_server sets propagate=False; 8.4 added direct handler
+    # attachment to non-propagating loggers).
+    "pytest>=8.4",
     "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
     "ruff>=0.7",
