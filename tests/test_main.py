@@ -14,7 +14,7 @@ from qmd_py.config import Settings
 
 def _missing_postgres_url_error() -> ValidationError:
     try:
-        Settings(_env_file=None)  # type: ignore[call-arg]
+        Settings(_env_file=None)
     except ValidationError as exc:
         return exc
     raise AssertionError("expected Settings() to raise without postgres_url")

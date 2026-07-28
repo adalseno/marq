@@ -534,7 +534,7 @@ def _register_get_tool(mcp: FastMCP) -> None:
                 EmbeddedResource(
                     type="resource",
                     resource=TextResourceContents(
-                        uri=f"marq://{_encode_qmd_path(result.display_path)}",  # type: ignore[arg-type]
+                        uri=f"marq://{_encode_qmd_path(result.display_path)}",
                         mimeType="text/markdown",
                         text=text,
                     ),
@@ -609,7 +609,7 @@ def _register_multi_get_tool(mcp: FastMCP) -> None:
                 EmbeddedResource(
                     type="resource",
                     resource=TextResourceContents(
-                        uri=f"marq://{_encode_qmd_path(r.display_path)}",  # type: ignore[arg-type]
+                        uri=f"marq://{_encode_qmd_path(r.display_path)}",
                         mimeType="text/markdown",
                         text=r.body,
                     ),

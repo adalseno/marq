@@ -65,6 +65,13 @@ extend-exclude = ["alembic/versions"]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.mypy]
+# Teaches mypy how pydantic actually builds models: that BaseSettings
+# fields can arrive from the environment (so `Settings()` with no
+# arguments is legal), and that annotated field types coerce their
+# inputs (so a plain `str` is accepted where a model wants `AnyUrl`).
+# Without it, four call sites need `type: ignore` for things pydantic
+# does correctly at runtime.
+plugins = ["pydantic.mypy"]
 python_version = "3.13"
 strict = true
 ignore_missing_imports = true

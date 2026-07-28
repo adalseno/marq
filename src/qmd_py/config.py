@@ -87,4 +87,4 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Lazily constructed so importing this module doesn't require
     MARQ_POSTGRES_URL to already be set (e.g. during test collection)."""
-    return Settings()  # type: ignore[call-arg]  # postgres_url comes from env
+    return Settings()  # postgres_url comes from env
