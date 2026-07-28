@@ -27,6 +27,8 @@ TS reference's actual JSON schema, not internal Python code.
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from importlib.metadata import version
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
@@ -205,6 +207,7 @@ def _round2(value: float) -> float:
 
 async def _run_query_search(
     *,
+    llm_client: LlmClient,
     query: str | None,
     searches: list[SubSearch] | None,
     limit: int,
@@ -217,7 +220,13 @@ async def _run_query_search(
     """Shared core behind the `query` tool - runs hybrid_query() either in
     plain-text (auto-expanded) mode or structured (caller-supplied
     lex/vec/hyde sub-queries) mode, and shapes results into the TS
-    reference's `SearchResultItem` dict shape. Returns (items, primary_query)."""
+    reference's `SearchResultItem` dict shape. Returns (items, primary_query).
+
+    `llm_client` is the server-lifetime client created in
+    `create_mcp_server` - constructing one per call made every query pay
+    TCP/TLS setup and pool warmup instead of reusing keep-alive
+    connections (`httpx.AsyncClient` is concurrency-safe, which the
+    gathered /tokenize fan-out already relies on)."""
     settings = get_settings()
     async with get_session() as session:
         user = await get_current_user(session)
@@ -246,23 +255,22 @@ async def _run_query_search(
         # callers).
         fetch_limit = limit if len(effective_collections) <= 1 else max(50, limit * 2)
 
-        async with LlmClient(settings.llm_base_url) as llm_client:
-            results = await hybrid_query(
-                session,
-                user,
-                primary_query,
-                llm_client,
-                ModelConfig.from_settings(settings),
-                QueryOptions(
-                    limit=fetch_limit,
-                    min_score=min_score,
-                    candidate_limit=candidate_limit or 40,
-                    collection_name=single,
-                    intent=intent,
-                    skip_rerank=not rerank,
-                    preexpanded=preexpanded,
-                ),
-            )
+        results = await hybrid_query(
+            session,
+            user,
+            primary_query,
+            llm_client,
+            ModelConfig.from_settings(settings),
+            QueryOptions(
+                limit=fetch_limit,
+                min_score=min_score,
+                candidate_limit=candidate_limit or 40,
+                collection_name=single,
+                intent=intent,
+                skip_rerank=not rerank,
+                preexpanded=preexpanded,
+            ),
+        )
 
     results = _filter_by_collections(results, effective_collections)
     results = results[:limit]
@@ -330,7 +338,7 @@ Combine types for best results. First sub-query gets 2x weight — put your stro
 """
 
 
-def _register_query_tool(mcp: FastMCP) -> None:
+def _register_query_tool(mcp: FastMCP, llm_client: LlmClient) -> None:
     @mcp.tool(
         name="query",
         title="Query",
@@ -423,6 +431,7 @@ def _register_query_tool(mcp: FastMCP) -> None:
                 )
 
         items, primary_query = await _run_query_search(
+            llm_client=llm_client,
             query=query,
             searches=searches,
             limit=limit,
@@ -711,7 +720,7 @@ def _register_document_resource(mcp: FastMCP) -> None:
 # =============================================================================
 
 
-def _register_rest_routes(mcp: FastMCP, start_time: float) -> None:
+def _register_rest_routes(mcp: FastMCP, start_time: float, llm_client: LlmClient) -> None:
     from starlette.requests import Request
     from starlette.responses import JSONResponse
 
@@ -750,6 +759,7 @@ def _register_rest_routes(mcp: FastMCP, start_time: float) -> None:
         intent = params.get("intent") if isinstance(params.get("intent"), str) else None
 
         items, _primary_query = await _run_query_search(
+            llm_client=llm_client,
             query=None,
             searches=searches,
             limit=params["limit"] if isinstance(params.get("limit"), int) else 10,
@@ -804,8 +814,26 @@ async def create_mcp_server(
         await session.commit()
         instructions = await build_instructions(session, user, settings.embed_model)
 
+    # One connection pool for the server's whole lifetime - every query
+    # reuses keep-alive connections instead of paying TCP/TLS setup per
+    # call (the CLI can't do better, one process per command; a
+    # long-lived server can). Closed via the lifespan hook.
+    llm_client = LlmClient(settings.llm_base_url)
+
+    @asynccontextmanager
+    async def _lifespan(_server: FastMCP) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            await llm_client.aclose()
+
     mcp = FastMCP(
-        name="marq", instructions=instructions, host=host, port=port, json_response=True
+        name="marq",
+        instructions=instructions,
+        host=host,
+        port=port,
+        json_response=True,
+        lifespan=_lifespan,
     )
     # FastMCP's own constructor has no `version` parameter - it always
     # constructs its internal low-level Server with version=None, which
@@ -814,11 +842,11 @@ async def create_mcp_server(
     # public attribute on the low-level Server) so a client actually sees
     # which qmd-py release it's talking to.
     mcp._mcp_server.version = version("qmd-py")
-    _register_query_tool(mcp)
+    _register_query_tool(mcp, llm_client)
     _register_get_tool(mcp)
     _register_multi_get_tool(mcp)
     _register_status_tool(mcp, settings.embed_model)
     _register_document_resource(mcp)
     if http:
-        _register_rest_routes(mcp, time.time())
+        _register_rest_routes(mcp, time.time(), llm_client)
     return mcp
