@@ -16,7 +16,9 @@ pull in the docs toolchain's Material-lineage dependency tree). Use
 
 Local dev Postgres: `cp .env.dev .env && podman-compose up -d` starts a
 disposable `pgvector/pgvector:pg16` container on `localhost:5433`,
-version-matched to production. See [Configuration](../configuration.md).
+version-matched to production. `docker compose up -d` works identically —
+see the runtime note in the [Quickstart](../quickstart.md). See
+[Configuration](../configuration.md) to point marq elsewhere instead.
 
 ## Testing conventions
 

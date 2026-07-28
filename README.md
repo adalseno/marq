@@ -103,7 +103,7 @@ not a raw traceback.
 # 1. Local dev Postgres (pgvector/pgvector:pg16), or point MARQ_POSTGRES_URL
 #    at your own instance instead.
 cp .env.dev .env
-podman-compose up -d
+podman-compose up -d          # or: docker compose up -d
 
 # 2. Apply migrations.
 uv run alembic upgrade head
@@ -227,8 +227,9 @@ uv run zensical serve      # preview the docs site locally (docs/, zensical.toml
 Tests use a fresh, isolated Postgres schema per test run (see
 `tests/conftest.py`) against the same instance `MARQ_POSTGRES_URL`
 points at — `.env.dev` (copy to `.env`) starts a disposable
-`pgvector/pgvector:pg16` container via `podman-compose up -d` that
-matches production's Postgres version exactly.
+`pgvector/pgvector:pg16` container via `podman-compose up -d` (or
+`docker compose up -d` — that service is runtime-agnostic) that matches
+production's Postgres version exactly.
 
 `tests/fixtures/sample-collection/` is a small, frozen, checked-in
 multi-language fixture (`.md`/`.py`/`.js`/`.ts`) used by both the test

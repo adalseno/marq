@@ -99,9 +99,13 @@ the plan once the project moves there) — build and preview locally.
 
 Local dev Postgres: `cp .env.dev .env && podman-compose up -d` starts a
 disposable `pgvector/pgvector:pg16` container on `localhost:5433`,
-version-matched to the production instance. An optional local LLM router
-is available too (`llm-stack/README.md`) — entirely for convenience, not
-required; `MARQ_LLM_BASE_URL` can point anywhere OpenAI-endpoint-shaped.
+version-matched to the production instance. `docker compose up -d` is
+equivalent — that service is plain Compose spec, so the runtime is a
+preference. An optional local LLM router is available too
+(`llm-stack/README.md`) — entirely for convenience, not required;
+`MARQ_LLM_BASE_URL` can point anywhere OpenAI-endpoint-shaped. That one
+is Linux-only whichever runtime you use (it passes through `/dev/dri` and
+labels a mount `:Z`), which is why the note lives in its README.
 
 ### Testing conventions
 

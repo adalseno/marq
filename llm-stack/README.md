@@ -17,7 +17,28 @@ the LLM router holds no state of ours.
    - `qwen3-reranker-0.6b-q8_0.gguf` (reranking)
    - `qwen2.5-3b-instruct-q4_k_m.gguf` (query expansion/chat)
 2. Start it: `podman-compose --profile llm up -d llm`
+   (Docker: `docker compose --profile llm up -d llm` — see the host
+   requirements below, which bind harder here than for Postgres.)
 3. Point `.env` at it: `MARQ_LLM_BASE_URL=http://localhost:8099`
+
+## Host requirements (podman or Docker, but Linux either way)
+
+The Postgres container in `compose.yaml` is portable to Docker with no
+change beyond the command name. This service is not, because two of its
+settings are Linux-host concepts rather than runtime concepts:
+
+- `devices: - /dev/dri` passes through the GPU. There is no `/dev/dri`
+  inside Docker Desktop's VM on macOS or Windows, so the service won't
+  start there under either runtime.
+- The `:Z` on the `./llm-stack/models` mount asks for SELinux
+  relabelling. Docker honours `:Z` on an SELinux host and ignores it
+  elsewhere, so it is harmless off Fedora/RHEL — just inert.
+
+None of this is a reason to avoid Docker for marq itself: this stack is
+optional, nothing depends on it, and `MARQ_LLM_BASE_URL` can point at any
+OpenAI-shaped endpoint. On a machine without a usable GPU — including
+Docker Desktop — drop `--gpu-layers 99` or use the CPU-only image, as
+described below, and it runs anywhere.
 
 ## GPU acceleration
 

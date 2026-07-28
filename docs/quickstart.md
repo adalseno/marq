@@ -31,6 +31,23 @@ This starts a disposable `pgvector/pgvector:pg16` container on
 marq's schema migrations. See [Configuration](configuration.md) if
 you'd rather point marq at your own Postgres instance instead.
 
+!!! note "Docker works too — `podman-compose` is a preference, not a requirement"
+
+    Substitute `docker compose up -d` and everything else is unchanged.
+    The `postgres` service is plain Compose spec (environment, ports, a
+    named volume, a healthcheck), and the fully-qualified
+    `docker.io/pgvector/pgvector:pg16` image name — a podman idiom — is
+    equally valid to Docker. The named volume also avoids the
+    host-permission differences between rootless podman and rootful
+    Docker.
+
+    The caveats are all in the **optional** `llm` service, which is
+    behind a profile and off by default: it passes through `/dev/dri` for
+    GPU acceleration and labels its model mount `:Z` for SELinux. Both
+    are Linux-host concepts, so that service won't start under Docker
+    Desktop on macOS or Windows. Nothing else depends on it — see
+    `llm-stack/README.md`.
+
 You'll also need a reachable LLM endpoint for `vsearch`/`query`/`embed`
 (anything OpenAI-endpoint-shaped for embeddings/chat/reranking) —
 `.env.dev`'s default points at a real router; see
