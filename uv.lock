@@ -1270,7 +1270,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.1" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", specifier = ">=1.2" },
+    { name = "mcp", specifier = ">=1.8,<2" },
     { name = "mkdocs-click", marker = "extra == 'docs'", specifier = ">=0.9.0" },
     { name = "mkdocstrings", marker = "extra == 'docs'", specifier = ">=1.0.6" },
     { name = "mkdocstrings-python", marker = "extra == 'docs'", specifier = ">=2.0.5" },
