@@ -43,22 +43,30 @@ for a real external collection, usable without SSH access or external
 data. `tests/fixtures/bench-sample-collection.json` is a matching
 benchmark fixture for `marq bench`.
 
-**CLI and MCP commands are deliberately *not* end-to-end pytested.**
-They call `db/engine.py`'s real, process-global (`lru_cache`'d)
-`get_engine()`/`get_session()`, bound to whatever `MARQ_POSTGRES_URL`
-actually resolves to at runtime — not the test suite's per-test
-isolated schema. Retrofitting that (redirecting the real engine to an
-isolated schema via monkeypatching, working around the cross-event-loop
-connection-pool hazards that come with it) was considered and rejected:
-it would fight this project's existing design for uncertain benefit.
-**Verify these live instead**: run `uv run marq <command>` against a
-real reachable Postgres + LLM router — ideally both a dev instance and
-production before calling a change done, cleaning up any collection you
-added afterward.
+**CLI and MCP commands are end-to-end pytested.** Two `conftest.py`
+fixtures redirect `db/engine.py`'s process-global (`lru_cache`'d)
+`get_engine()`/`get_session()` at a throwaway schema, which is what made
+this possible: `marq` (sync, click's `CliRunner` — see
+`tests/test_cli.py`, `test_cli_query.py`) and `mcp_env` (async, a real
+MCP `ClientSession` over the SDK's in-memory transport — see
+`tests/test_mcp_server.py`). Both patch `MARQ_POSTGRES_SCHEMA` and call
+`reset_engine()`.
+
+Two constraints come with that. CLI tests must be **sync**: every command
+body ends in `cli/runtime.py`'s `asyncio.run()`, which refuses to start
+inside a running loop. And `reset_engine()` has to run between
+invocations in one process, since pooled connections don't survive their
+event loop.
+
+**Still verify live before calling a change done.** End-to-end tests
+cover the command surface; they don't cover the real Postgres and router
+your data actually lives on. Run `uv run marq <command>` against a
+reachable instance — ideally both dev and production — cleaning up any
+collection you added afterward.
 
 This isn't a theoretical concern. Several real bugs in this project were
 only caught by actually running the CLI/MCP server against real
-infrastructure, never by a unit test:
+infrastructure, never by a test:
 
 - A Postgres `ts_rank` weight array out of the `[0, 1]` range it
   requires (a raw SQL error, only reachable by really running a search).

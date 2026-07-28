@@ -36,8 +36,9 @@ Stopped MCP daemon (pid 1068308).
   disk. `MARQ_LOG_LEVEL`/`MARQ_LOG_FILE` override both if set; see
   [Configuration](configuration.md#marq_log_level).
 - `mcp-stdio.log` — anything the process writes outside the logging
-  system (a startup traceback, uvicorn's own banner). Truncated at each
-  start.
+  system (a startup traceback, uvicorn's own banner). Rotated at each
+  start: the previous run moves to `mcp-stdio.log.1`, so a crashed
+  daemon's traceback survives the restart you do to investigate it.
 
 At `INFO` the log carries one line per request, correlated by a short
 id so concurrent tool calls stay followable:

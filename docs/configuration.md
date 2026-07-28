@@ -151,7 +151,10 @@ stray log line would corrupt either one.
 since the caller's stderr is gone the moment the command returns. Any
 output the daemon writes outside the logging system (a startup traceback,
 a library printing directly to stderr) lands in
-`~/.cache/marq/mcp-stdio.log`, which is truncated at each start.
+`~/.cache/marq/mcp-stdio.log`. That file is rotated at each start — the
+previous run moves to `mcp-stdio.log.1` — so a crashed daemon's traceback
+survives the restart you do to investigate it, while growth stays bounded
+at two files.
 
 !!! note "What gets logged, and what never does"
 
