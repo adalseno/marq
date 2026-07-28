@@ -199,6 +199,11 @@ async def reindex_collection(
         filepath = root / rel_path
         try:
             content = filepath.read_text(encoding="utf-8")
+            # Inside the try, not after it: a file deleted between the
+            # read and the stat (a branch switch mid-walk - the exact
+            # fast-moving-worktree case this indexer supports) must count
+            # as skipped, not raise FileNotFoundError.
+            mtime = filepath.stat().st_mtime
         except (OSError, UnicodeDecodeError):
             continue
         if not content.strip():
@@ -210,7 +215,7 @@ async def reindex_collection(
 
         digest = hash_content(content)
         title = extract_title(content, rel_path)
-        modified_at = datetime.fromtimestamp(filepath.stat().st_mtime, tz=UTC)
+        modified_at = datetime.fromtimestamp(mtime, tz=UTC)
 
         existing = await find_document_by_path(session, collection.id, rel_path)
         if existing is not None:

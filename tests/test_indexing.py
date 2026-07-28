@@ -134,6 +134,47 @@ async def test_reindex_collection_skips_unreadable_and_empty_files(
     assert await get_active_document_paths(session, collection.id) == ["good.md"]
 
 
+async def test_reindex_collection_survives_a_file_vanishing_between_read_and_stat(
+    tmp_path: Path,
+    session: AsyncSession,
+    user: CurrentUser,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for the third review's finding 2 (TOCTOU): the `stat()`
+    call sat outside the `try` guarding `read_text()`, so a file deleted
+    between the two - the fast-moving-worktree race the indexer is
+    documented to support - raised an unhandled FileNotFoundError. The
+    vanished file must count as skipped instead."""
+    import qmd_py.store.indexing as indexing_module
+
+    (tmp_path / "stable.md").write_text("# Stable\n\nbody")
+    (tmp_path / "vanishing.md").write_text("# Vanishing\n\nbody")
+    collection = await add_collection(session, user, "racy", str(tmp_path), "**/*.md")
+    await session.commit()
+
+    # Pin the walk result first: `_discover_files` itself stats every
+    # candidate (`is_file()`), which would drop the file before the loop
+    # and dodge the race this test exists to simulate. The race is
+    # read_text() succeeding and *then* stat() failing.
+    monkeypatch.setattr(
+        indexing_module, "_discover_files", lambda *a, **k: ["stable.md", "vanishing.md"]
+    )
+    real_stat = Path.stat
+
+    def racing_stat(self: Path, **kwargs: object) -> object:
+        if self.name == "vanishing.md":
+            raise FileNotFoundError(f"deleted mid-walk: {self}")
+        return real_stat(self, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "stat", racing_stat)
+    result = await reindex_collection(session, user, "racy")
+    monkeypatch.undo()
+    await session.commit()
+
+    assert result.indexed == 1
+    assert await get_active_document_paths(session, collection.id) == ["stable.md"]
+
+
 async def test_reindex_collection_skips_and_counts_oversized_files(
     tmp_path: Path, session: AsyncSession, user: CurrentUser
 ) -> None:
