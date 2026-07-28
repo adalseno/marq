@@ -6,7 +6,9 @@ these necessarily hit the real embedding endpoint.
 """
 
 from collections.abc import AsyncIterator
+from unittest.mock import patch
 
+import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -172,6 +174,46 @@ async def test_embed_pending_documents_is_idempotent(
     second = await embed_pending_documents(session, user, llm_client, EMBED_MODEL, EMBED_DIM)
     await session.commit()
     assert second.docs_processed == 0
+
+
+@pytest.mark.integration
+async def test_embed_pending_documents_commits_each_document(
+    session: AsyncSession, user: CurrentUser, llm_client: LlmClient
+) -> None:
+    """A crash partway through a large embed run must keep the documents
+    already written: the pending query is `hash NOT IN (embeddings)`, so
+    committing per document makes the run resumable. Here the router
+    fails on the third document; the first two must survive a rollback.
+    """
+    collection = await add_collection(session, user, "vecresume", "/tmp/vecresume")
+    for i in range(3):
+        digest = f"vhashr{i}"
+        await insert_content(session, digest, f"Document number {i} about hydroponic gardening.")
+        await insert_document(
+            session, collection.id, f"r{i}.md", f"R{i}", digest, utcnow(), utcnow()
+        )
+    await session.commit()
+
+    calls = 0
+    real_embed = llm_client.embed
+
+    async def failing_embed(texts: list[str], model: str) -> list[list[float]]:
+        nonlocal calls
+        calls += 1
+        if calls > 2:
+            raise httpx.ConnectError("router went away")
+        return await real_embed(texts, model)
+
+    with patch.object(llm_client, "embed", failing_embed):
+        with pytest.raises(httpx.ConnectError):
+            await embed_pending_documents(session, user, llm_client, EMBED_MODEL, EMBED_DIM)
+    await session.rollback()
+
+    # Two documents were committed before the failure, so a resumed run
+    # only has the third left to do.
+    resumed = await embed_pending_documents(session, user, llm_client, EMBED_MODEL, EMBED_DIM)
+    await session.commit()
+    assert resumed.docs_processed == 1
 
 
 @pytest.mark.integration

@@ -312,6 +312,8 @@ async def _embed_impl(
     model_slug = model or settings.embed_model
     async with LlmClient(settings.llm_base_url) as llm_client:
         dimension = await get_or_probe_dimension(session, llm_client, model_slug)
+        # Commits per document internally, so an interrupted run keeps
+        # what it already embedded and resumes where it left off.
         result = await embed_pending_documents(
             session, user, llm_client, model_slug, dimension, collection_name=collection
         )
