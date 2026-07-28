@@ -3,6 +3,7 @@ for Streamable HTTP, `--daemon` to background the HTTP server) - port of
 the TS reference's `mcp` CLI surface (src/cli/qmd.ts).
 """
 
+import logging
 import os
 import signal
 import subprocess
@@ -61,9 +62,15 @@ def _run_http(host: str, port: int) -> None:
     from qmd_py.mcp.server import create_mcp_server
 
     async def main() -> None:
-        server = await create_mcp_server(http=True, host=host, port=port)
+        server = await create_mcp_server(http=True)
         click.echo(f"marq MCP server listening on http://{host}:{port}/mcp", err=True)
-        await server.run_streamable_http_async()
+        logging.getLogger("qmd_py.mcp.server").info(
+            "mcp http transport binding %s:%d", host, port
+        )
+        # The bind and the JSON-response mode are arguments to the run
+        # call in the SDK's 2.x API; under 1.x they were baked into the
+        # server object by create_mcp_server().
+        await server.run_streamable_http_async(host=host, port=port, json_response=True)
 
     anyio.run(main)
 

@@ -21,11 +21,14 @@ to clear the last ones out, read this first.
 They fall into two groups, and both are about **someone else's types**,
 not ours:
 
-- **Untyped third-party decorators.** The MCP SDK's `FastMCP` exposes
-  some decorators without annotations, so `strict` mode flags any
-  function they wrap. Silencing it needs either upstream changes or a
-  local stub package for the SDK — a lot of surface area to maintain for
-  no checking we'd actually gain.
+- **Untyped third-party decorators.** The MCP SDK's `MCPServer.custom_route`
+  carries no annotations, so `strict` mode flags any function it wraps
+  (`untyped-decorator`). It is down to a single occurrence — the SDK 2.x
+  port removed the other one, since the low-level resource registration
+  that used to need a decorator is now an ordinary, fully typed
+  `add_request_handler()` call. Silencing the last one needs either
+  upstream changes or a local stub package for the SDK — a lot of surface
+  area to maintain for no checking we'd actually gain.
 - **Test scaffolding that takes `**overrides`.** The formatter tests
   build fixture objects from a defaults dict splatted into a dataclass.
   Spelling out typed keyword parameters for every field of every builder

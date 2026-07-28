@@ -55,7 +55,7 @@ Everything else is at or above 84%, and the search/storage core
 | src/qmd\_py/cli/commands/\_\_init\_\_.py |        0 |        0 |    100% |
 | src/qmd\_py/cli/commands/bench.py        |       30 |       16 |     47% |
 | src/qmd\_py/cli/commands/doctor.py       |      108 |       23 |     79% |
-| src/qmd\_py/cli/commands/mcp.py          |       90 |       45 |     50% |
+| src/qmd\_py/cli/commands/mcp.py          |       92 |       46 |     50% |
 | src/qmd\_py/cli/commands/query.py        |      104 |       10 |     90% |
 | src/qmd\_py/cli/commands/read.py         |      218 |       20 |     91% |
 | src/qmd\_py/cli/commands/skill.py        |      104 |        8 |     92% |
@@ -73,7 +73,7 @@ Everything else is at or above 84%, and the search/storage core
 | src/qmd\_py/llm/client.py                |       55 |        0 |    100% |
 | src/qmd\_py/log.py                       |       57 |        0 |    100% |
 | src/qmd\_py/mcp/\_\_init\_\_.py          |        0 |        0 |    100% |
-| src/qmd\_py/mcp/server.py                |      302 |       28 |     91% |
+| src/qmd\_py/mcp/server.py                |      300 |       28 |     91% |
 | src/qmd\_py/search/\_\_init\_\_.py       |        0 |        0 |    100% |
 | src/qmd\_py/search/\_acl.py              |       16 |        0 |    100% |
 | src/qmd\_py/search/fts.py                |      167 |        2 |     99% |
@@ -89,4 +89,4 @@ Everything else is at or above 84%, and the search/storage core
 | src/qmd\_py/store/indexing.py            |      116 |        3 |     97% |
 | src/qmd\_py/store/retrieval.py           |      186 |        2 |     99% |
 | src/qmd\_py/vpath.py                     |       12 |        0 |    100% |
-| **TOTAL**                                | **3347** |  **248** | **93%** |
+| **TOTAL**                                | **3347** |  **249** | **93%** |

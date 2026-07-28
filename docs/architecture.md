@@ -119,7 +119,7 @@ per command or command group). `main()` wraps the whole CLI in a
 
 ## MCP server
 
-The official `mcp` Python SDK's `FastMCP`
+The official `mcp` Python SDK's `MCPServer` (SDK 2.x)
 (`src/qmd_py/mcp/server.py`) — see [MCP server](mcp-server.md) for the
 full picture (transports, tools, the `marq://` resource, REST
 endpoints).

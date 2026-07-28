@@ -210,7 +210,7 @@ endpoints alongside full MCP JSON-RPC at `/mcp`.
   one function body, not a rearchitecture.
 - **CLI**: `click`, one command (or command group) per file under
   `src/qmd_py/cli/commands/`.
-- **MCP server**: the official `mcp` Python SDK's `FastMCP`.
+- **MCP server**: the official `mcp` Python SDK's `MCPServer` (SDK 2.x).
 
 ## Development
 

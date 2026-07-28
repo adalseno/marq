@@ -167,11 +167,14 @@ required; `MARQ_LLM_BASE_URL` can point anywhere OpenAI-endpoint-shaped.
   `src/qmd_py/cli/commands/`. `main.py`'s `main()` wraps the whole CLI to
   turn a missing/invalid `MARQ_*` setting into a short message instead of
   a raw pydantic traceback.
-- **MCP server**: the official `mcp` Python SDK's `FastMCP`
-  (`src/qmd_py/mcp/server.py`). The `marq://{path}` document resource is
-  registered against the low-level `mcp._mcp_server` directly (bypassing
-  FastMCP's own `@mcp.resource()` decorator, whose template matching
-  can't express a slash-spanning path segment).
+- **MCP server**: the official `mcp` Python SDK's `MCPServer`
+  (`src/qmd_py/mcp/server.py`), written against the **SDK 2.x** API. The
+  `marq://{path}` document resource is registered against the low-level
+  server directly, via `add_request_handler("resources/read", ...)`,
+  bypassing `MCPServer`'s own `@mcp.resource()` decorator (whose template
+  matching can't express a slash-spanning path segment). `host`/`port`/
+  `json_response` are arguments to `run_streamable_http_async()`, not to
+  the constructor, so `create_mcp_server()` takes no bind address.
 - **Logging**: stdlib `logging` under one `qmd_py` logger hierarchy
   (`src/qmd_py/log.py`), configured from `MARQ_LOG_LEVEL`/`MARQ_LOG_FILE`
   at exactly two wire-up points (`cli/main.py`'s group callback and
@@ -182,7 +185,7 @@ required; `MARQ_LLM_BASE_URL` can point anywhere OpenAI-endpoint-shaped.
   WARNING and INFO, never queries or document bodies (content is DEBUG
   only). The default WARNING level is silent on a healthy run, so a
   non-empty log means something actually degraded. `create_mcp_server()`
-  sets `propagate = False` because FastMCP calls `basicConfig()` with a
+  sets `propagate = False` because the SDK calls `basicConfig()` with a
   RichHandler on the root logger.
 - **Python package name stays `qmd_py`** (distribution `qmd-py`) even
   though the CLI/MCP product surface is branded `marq` — the package

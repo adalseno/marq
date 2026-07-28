@@ -1,5 +1,5 @@
-"""MCP server: FastMCP tools (`query`/`get`/`multi_get`/`status`) plus a
-raw `marq://{path}` document resource - port of the TS reference's
+"""MCP server: `MCPServer` tools (`query`/`get`/`multi_get`/`status`) plus
+a raw `marq://{path}` document resource - port of the TS reference's
 src/mcp/server.ts.
 
 Each tool/resource handler opens its own short-lived DB session (see
@@ -9,14 +9,21 @@ are concurrent and long-lived; the async engine's connection pool makes
 this cheap.
 
 The `document` resource is registered directly against the low-level
-`mcp._mcp_server` (bypassing FastMCP's own `@mcp.resource()` decorator)
-because that decorator's template matching only supports a single path
-segment per `{param}` (regex `[^/]+`) - it cannot express the TS
-reference's `qmd://{+path}` (RFC 6570 reserved expansion, matches
-slashes). The low-level `read_resource()` handler receives the full raw
-URI string instead, which we parse ourselves. No `list_resources` handler
-is registered, matching the TS reference's `list: undefined` (documents
-are discovered via the search tools, not listed).
+server (bypassing `MCPServer`'s own `@mcp.resource()` decorator) because
+that decorator's template matching only supports a single path segment
+per `{param}` (regex `[^/]+`) - it cannot express the TS reference's
+`qmd://{+path}` (RFC 6570 reserved expansion, matches slashes). The
+low-level handler receives the full raw URI string instead, which we
+parse ourselves. No `list_resources` handler is registered, matching the
+TS reference's `list: undefined` (documents are discovered via the search
+tools, not listed).
+
+Written against the `mcp` SDK's 2.x API. The 1.x spelling of that bypass
+was a `@mcp._mcp_server.read_resource()` decorator returning
+`list[ReadResourceContents]`; 2.0 replaced the low-level per-method
+decorators with one `add_request_handler(method, params_type, handler)`
+registry, whose handlers take `(ctx, params)` and return the result model
+(`ReadResourceResult`) directly. Same bypass, different spelling.
 
 Field names on tool input schemas deliberately stay camelCase
 (`minScore`, `candidateLimit`, ...) rather than idiomatic snake_case:
@@ -35,13 +42,14 @@ from importlib.metadata import version
 from typing import Annotated, Any, Literal, ParamSpec, TypeVar
 from urllib.parse import quote, unquote
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.lowlevel.helper_types import ReadResourceContents
+from mcp.server.mcpserver import MCPServer
 from mcp.types import (
     AudioContent,
     CallToolResult,
     EmbeddedResource,
     ImageContent,
+    ReadResourceRequestParams,
+    ReadResourceResult,
     ResourceLink,
     TextContent,
     TextResourceContents,
@@ -90,7 +98,7 @@ def _with_request_id(prefix: str) -> Callable[[_AsyncFunc[P, R]], _AsyncFunc[P, 
     Tool calls are concurrent, so their lines interleave in the daemon
     log; the id is what makes a single call's trace followable.
     Applied *under* `@mcp.tool()` and with `functools.wraps`, so the
-    signature FastMCP introspects to build the JSON schema is still the
+    signature MCPServer introspects to build the JSON schema is still the
     real one (`inspect.signature` follows `__wrapped__`).
     """
 
@@ -375,12 +383,12 @@ Combine types for best results. First sub-query gets 2x weight — put your stro
 """
 
 
-def _register_query_tool(mcp: FastMCP, llm_client: LlmClient) -> None:
+def _register_query_tool(mcp: MCPServer, llm_client: LlmClient) -> None:
     @mcp.tool(
         name="query",
         title="Query",
         description=_QUERY_TOOL_DESCRIPTION,
-        annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     @_with_request_id("query")
     async def query(
@@ -446,7 +454,7 @@ def _register_query_tool(mcp: FastMCP, llm_client: LlmClient) -> None:
                         "(typed sub-queries)",
                     )
                 ],
-                isError=True,
+                is_error=True,
             )
         if query and searches:
             logger.warning(
@@ -461,7 +469,7 @@ def _register_query_tool(mcp: FastMCP, llm_client: LlmClient) -> None:
                         "provide only one",
                     )
                 ],
-                isError=True,
+                is_error=True,
             )
         if searches:
             invalid = validate_typed_queries(
@@ -471,7 +479,7 @@ def _register_query_tool(mcp: FastMCP, llm_client: LlmClient) -> None:
                 logger.warning("query tool rejected: %s", invalid)
                 return CallToolResult(
                     content=[TextContent(type="text", text=f"Error: {invalid}")],
-                    isError=True,
+                    is_error=True,
                 )
 
         items, primary_query = await _run_query_search(
@@ -487,7 +495,7 @@ def _register_query_tool(mcp: FastMCP, llm_client: LlmClient) -> None:
         )
         return CallToolResult(
             content=[TextContent(type="text", text=_format_search_summary(items, primary_query))],
-            structuredContent={"results": items},
+            structured_content={"results": items},
         )
 
 
@@ -520,14 +528,14 @@ def _parse_get_lookup(
     return lookup, from_line, max_lines
 
 
-def _register_get_tool(mcp: FastMCP) -> None:
+def _register_get_tool(mcp: MCPServer) -> None:
     @mcp.tool(
         name="get",
         title="Get Document",
         description="Retrieve the full content of a document by its file path or docid. "
         "Use paths or docids (#abc123) from search results. Suggests similar files if not "
         "found.",
-        annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     @_with_request_id("get")
     async def get(
@@ -566,7 +574,7 @@ def _register_get_tool(mcp: FastMCP) -> None:
             if result.similar_files:
                 suggestions = "\n".join(f"  - {s}" for s in result.similar_files)
                 msg += f"\n\nDid you mean one of these?\n{suggestions}"
-            return CallToolResult(content=[TextContent(type="text", text=msg)], isError=True)
+            return CallToolResult(content=[TextContent(type="text", text=msg)], is_error=True)
 
         assert isinstance(result, DocumentDetail)
         body = result.body
@@ -589,7 +597,7 @@ def _register_get_tool(mcp: FastMCP) -> None:
                     type="resource",
                     resource=TextResourceContents(
                         uri=f"marq://{_encode_qmd_path(result.display_path)}",
-                        mimeType="text/markdown",
+                        mime_type="text/markdown",
                         text=text,
                     ),
                 )
@@ -602,13 +610,13 @@ def _register_get_tool(mcp: FastMCP) -> None:
 # =============================================================================
 
 
-def _register_multi_get_tool(mcp: FastMCP) -> None:
+def _register_multi_get_tool(mcp: MCPServer) -> None:
     @mcp.tool(
         name="multi_get",
         title="Multi-Get Documents",
         description="Retrieve multiple documents by glob pattern (e.g., "
         "'journals/2025-05*.md') or comma-separated list. Skips files larger than maxBytes.",
-        annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     @_with_request_id("mget")
     async def multi_get_tool(
@@ -645,7 +653,7 @@ def _register_multi_get_tool(mcp: FastMCP) -> None:
         if not results:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"No files matched pattern: {pattern}")],
-                isError=True,
+                is_error=True,
             )
 
         ContentBlock = TextContent | ImageContent | AudioContent | ResourceLink | EmbeddedResource
@@ -665,7 +673,7 @@ def _register_multi_get_tool(mcp: FastMCP) -> None:
                     type="resource",
                     resource=TextResourceContents(
                         uri=f"marq://{_encode_qmd_path(r.display_path)}",
-                        mimeType="text/markdown",
+                        mime_type="text/markdown",
                         text=r.body,
                     ),
                 )
@@ -678,13 +686,13 @@ def _register_multi_get_tool(mcp: FastMCP) -> None:
 # =============================================================================
 
 
-def _register_status_tool(mcp: FastMCP, embed_model: str) -> None:
+def _register_status_tool(mcp: MCPServer, embed_model: str) -> None:
     @mcp.tool(
         name="status",
         title="Index Status",
         description="Show the status of the QMD index: collections, document counts, and "
         "health information.",
-        annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     @_with_request_id("status")
     async def status() -> CallToolResult:
@@ -721,20 +729,23 @@ def _register_status_tool(mcp: FastMCP, embed_model: str) -> None:
         }
         return CallToolResult(
             content=[TextContent(type="text", text="\n".join(summary))],
-            structuredContent=structured,
+            structured_content=structured,
         )
 
 
 # =============================================================================
 # Resource: marq://{path} - see module docstring for why this bypasses
-# FastMCP's own @mcp.resource() decorator.
+# MCPServer's own @mcp.resource() decorator.
 # =============================================================================
 
 
-def _register_document_resource(mcp: FastMCP) -> None:
-    @mcp._mcp_server.read_resource()  # type: ignore[no-untyped-call,untyped-decorator]
-    async def _read_resource(uri: Any) -> list[ReadResourceContents]:
-        raw = str(uri)
+def _register_document_resource(mcp: MCPServer) -> None:
+    async def _read_resource(_ctx: Any, params: ReadResourceRequestParams) -> ReadResourceResult:
+        # `params.uri` is a plain `str` in the 2.x types (it was an
+        # `AnyUrl` in 1.x), which is what this handler wanted all along -
+        # the whole point of the bypass is to see the raw URI before any
+        # template matching splits it on slashes.
+        raw = params.uri
         path = raw[len("marq://") :] if raw.startswith("marq://") else raw
         decoded_path = unquote(path)
 
@@ -744,17 +755,23 @@ def _register_document_resource(mcp: FastMCP) -> None:
             result = await find_document(session, user, decoded_path)
 
         if isinstance(result, DocumentNotFound):
-            return [
-                ReadResourceContents(
-                    content=f"Document not found: {decoded_path}", mime_type="text/markdown"
-                )
-            ]
+            text = f"Document not found: {decoded_path}"
+        else:
+            assert isinstance(result, DocumentDetail)
+            text = add_line_numbers(result.body)
+            if result.context:
+                text = f"<!-- Context: {result.context} -->\n\n{text}"
 
-        assert isinstance(result, DocumentDetail)
-        text = add_line_numbers(result.body)
-        if result.context:
-            text = f"<!-- Context: {result.context} -->\n\n{text}"
-        return [ReadResourceContents(content=text, mime_type="text/markdown")]
+        return ReadResourceResult(
+            contents=[TextResourceContents(uri=raw, mime_type="text/markdown", text=text)]
+        )
+
+    # No decorator in 2.x: one registry keyed by JSON-RPC method name.
+    # `ReadResourceRequestParams` is the model incoming params are
+    # validated against before the handler runs.
+    mcp._lowlevel_server.add_request_handler(
+        "resources/read", ReadResourceRequestParams, _read_resource
+    )
 
 
 # =============================================================================
@@ -774,7 +791,7 @@ def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _register_rest_routes(mcp: FastMCP, start_time: float, llm_client: LlmClient) -> None:
+def _register_rest_routes(mcp: MCPServer, start_time: float, llm_client: LlmClient) -> None:
     from starlette.requests import Request
     from starlette.responses import JSONResponse
 
@@ -867,23 +884,25 @@ def _register_rest_routes(mcp: FastMCP, start_time: float, llm_client: LlmClient
 # =============================================================================
 
 
-async def create_mcp_server(
-    *, http: bool = False, host: str = "127.0.0.1", port: int = 8181
-) -> FastMCP:
+async def create_mcp_server(*, http: bool = False) -> MCPServer:
     """Build the MCP server with its tools, resource and instructions.
 
     Async because the instructions are built from live index state, which
     means a database round trip before the server can be constructed.
 
+    Takes no bind address: in the SDK's 2.x API `host`/`port`/
+    `json_response` are arguments to `run_streamable_http_async()` and
+    `streamable_http_app()`, not to the constructor, so the bind belongs
+    to whoever starts the transport (see `cli/commands/mcp.py`). Under
+    1.x they were constructor arguments and this function took them.
+
     Args:
         http: Also register the REST routes (`/health`, `/query`,
             `/search`). They only exist under the HTTP transport; `/mcp`
             itself is handled by the SDK.
-        host: Bind address, HTTP transport only.
-        port: Bind port, HTTP transport only.
 
     Returns:
-        A configured `FastMCP`, ready for either transport.
+        A configured `MCPServer`, ready for either transport.
     """
     settings = get_settings()
     # Never stdout: the stdio transport *is* JSON-RPC over stdout, so a
@@ -891,7 +910,7 @@ async def create_mcp_server(
     # writes to stderr or a file, and is idempotent, so this is safe
     # whether or not the CLI entry point already configured it.
     setup_logging(settings.log_level, settings.log_file)
-    # FastMCP calls logging.basicConfig() with a RichHandler on the *root*
+    # MCPServer calls logging.basicConfig() with a RichHandler on the *root*
     # logger, so records propagating up from `qmd_py` would be emitted a
     # second time, in a different format, to a different destination
     # (under --daemon: once to the log file, once to the captured stdio
@@ -910,27 +929,23 @@ async def create_mcp_server(
     llm_client = LlmClient(settings.llm_base_url)
 
     @asynccontextmanager
-    async def _lifespan(_server: FastMCP) -> AsyncIterator[None]:
+    async def _lifespan(_server: MCPServer) -> AsyncIterator[None]:
         try:
             yield
         finally:
             await llm_client.aclose()
 
-    mcp = FastMCP(
+    # `version` is a real constructor parameter in 2.x, so the client sees
+    # which qmd-py release it's talking to in initialize()'s serverInfo.
+    # Under 1.x it had to be poked onto the low-level server afterwards,
+    # because the constructor always passed version=None and the SDK then
+    # reported its *own* version instead of ours.
+    mcp = MCPServer(
         name="marq",
+        version=version("qmd-py"),
         instructions=instructions,
-        host=host,
-        port=port,
-        json_response=True,
         lifespan=_lifespan,
     )
-    # FastMCP's own constructor has no `version` parameter - it always
-    # constructs its internal low-level Server with version=None, which
-    # falls back to reporting the installed `mcp` SDK's own version in
-    # initialize()'s serverInfo, not qmd-py's. Set it directly (a plain
-    # public attribute on the low-level Server) so a client actually sees
-    # which qmd-py release it's talking to.
-    mcp._mcp_server.version = version("qmd-py")
     _register_query_tool(mcp, llm_client)
     _register_get_tool(mcp)
     _register_multi_get_tool(mcp)
@@ -938,10 +953,11 @@ async def create_mcp_server(
     _register_document_resource(mcp)
     if http:
         _register_rest_routes(mcp, time.time(), llm_client)
+    # No bind= here any more: the address isn't known until the transport
+    # starts. `_run_http` logs it at that point.
     logger.info(
-        "mcp server ready: transport=%s%s schema=%s models=embed:%s/generate:%s/rerank:%s",
+        "mcp server ready: transport=%s schema=%s models=embed:%s/generate:%s/rerank:%s",
         "http" if http else "stdio",
-        f" bind={host}:{port}" if http else "",
         settings.postgres_schema,
         settings.embed_model,
         settings.generate_model,

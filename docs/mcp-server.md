@@ -2,7 +2,7 @@
 
 marq exposes its search over the
 [Model Context Protocol](https://modelcontextprotocol.io/) via the
-official Python SDK's `FastMCP` — four tools plus a document resource,
+official Python SDK's `MCPServer` — four tools plus a document resource,
 over stdio or Streamable HTTP.
 
 ## Transports
@@ -89,11 +89,12 @@ A not-found path returns ordinary text content (`"Document not found:
 CLI side.
 
 The resource handler is registered directly against the low-level
-`mcp._mcp_server`, bypassing FastMCP's own `@mcp.resource()` decorator —
-that decorator's template matching only supports a single path segment
-per `{param}` (`[^/]+`), so it can't express a slash-spanning
-`marq://collection/nested/path.md`. The low-level `read_resource()`
-handler receives the full raw URI and parses it directly instead.
+server, bypassing `MCPServer`'s own `@mcp.resource()` decorator — that
+decorator's template matching only supports a single path segment per
+`{param}` (`[^/]+`), so it can't express a slash-spanning
+`marq://collection/nested/path.md`. The low-level handler receives the
+full raw URI and parses it directly instead, via the SDK 2.x
+`add_request_handler("resources/read", ...)` registry.
 
 ## Dynamic instructions
 

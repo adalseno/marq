@@ -17,12 +17,12 @@ by test_hybrid.py.
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import anyio
 import httpx
 import pytest
 from mcp.client.session import ClientSession
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.shared.memory import create_client_server_memory_streams
 from mcp.types import CallToolResult, EmbeddedResource, TextContent, TextResourceContents
-from pydantic import AnyUrl
 
 from qmd_py.auth import get_current_user
 from qmd_py.db.engine import get_session
@@ -49,9 +49,36 @@ async def _seed_documents() -> None:
 
 @asynccontextmanager
 async def _client() -> AsyncIterator[ClientSession]:
+    """A `ClientSession` wired to a real server over in-memory streams.
+
+    The SDK used to ship this as
+    `mcp.shared.memory.create_connected_server_and_client_session`, which
+    2.0 removed; only the stream pair below survives, so the plumbing it
+    used to hide - run the server in a task group, hand the other ends to
+    the client - lives here now. The session is deliberately *not*
+    initialized: the tests drive `initialize()` themselves, since its
+    response (serverInfo, instructions) is itself under test.
+    """
     server = await create_mcp_server()
-    async with create_connected_server_and_client_session(server) as session:
-        yield session
+    low = server._lowlevel_server
+    async with create_client_server_memory_streams() as (
+        (client_read, client_write),
+        (server_read, server_write),
+    ):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(
+                lambda: low.run(
+                    server_read,
+                    server_write,
+                    low.create_initialization_options(),
+                    raise_exceptions=True,
+                )
+            )
+            async with ClientSession(client_read, client_write) as session:
+                yield session
+            # Nothing else stops the server task, and leaving it running
+            # would hang the surrounding task group on exit.
+            tg.cancel_scope.cancel()
 
 
 def _text_of(result: CallToolResult) -> str:
@@ -69,16 +96,16 @@ def _text_of(result: CallToolResult) -> str:
 
 
 async def test_initialize_reports_marq_server_and_own_version(mcp_env: str) -> None:
-    """Regression guard on the `_mcp_server.version` assignment: FastMCP
-    otherwise reports the installed mcp SDK's version, not qmd-py's."""
+    """Regression guard on the server's reported version: left to itself
+    the SDK reports *its own* version here, not qmd-py's."""
     from importlib.metadata import version
 
     await _seed_documents()
     async with _client() as session:
         result = await session.initialize()
 
-    assert result.serverInfo.name == "marq"
-    assert result.serverInfo.version == version("qmd-py")
+    assert result.server_info.name == "marq"
+    assert result.server_info.version == version("qmd-py")
     assert result.instructions is not None
     assert "2 documents" in result.instructions
     assert "docs" in result.instructions
@@ -99,7 +126,7 @@ async def test_get_tool_returns_document_as_embedded_resource(mcp_env: str) -> N
         await session.initialize()
         result = await session.call_tool("get", {"file": "notes/alpha.md"})
 
-    assert result.isError is not True
+    assert result.is_error is not True
     assert "1: # Alpha" in _text_of(result)
 
 
@@ -133,7 +160,7 @@ async def test_get_tool_missing_document_is_an_error_with_suggestions(mcp_env: s
         await session.initialize()
         result = await session.call_tool("get", {"file": "notes/alpho.md"})
 
-    assert result.isError is True
+    assert result.is_error is True
     text = _text_of(result)
     assert "Document not found" in text
     assert "notes/alpha.md" in text
@@ -160,7 +187,7 @@ async def test_multi_get_tool_matches_glob(mcp_env: str) -> None:
         result = await session.call_tool("multi_get", {"pattern": "notes/*.md"})
 
     text = _text_of(result)
-    assert result.isError is not True
+    assert result.is_error is not True
     assert "unique-alpha-token" in text
     assert "unique-beta-token" in text
 
@@ -184,7 +211,7 @@ async def test_multi_get_tool_without_match_is_an_error(mcp_env: str) -> None:
         await session.initialize()
         result = await session.call_tool("multi_get", {"pattern": "nothing/*.md"})
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "No files matched pattern" in _text_of(result)
 
 
@@ -195,7 +222,7 @@ async def test_status_tool_reports_counts_and_structured_content(mcp_env: str) -
         result = await session.call_tool("status", {})
 
     assert "Total documents: 2" in _text_of(result)
-    structured = result.structuredContent
+    structured = result.structured_content
     assert structured is not None
     assert structured["totalDocuments"] == 2
     assert structured["hasVectorIndex"] is False
@@ -210,7 +237,7 @@ async def test_query_tool_rejects_missing_arguments(mcp_env: str) -> None:
         await session.initialize()
         result = await session.call_tool("query", {})
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "provide either 'query'" in _text_of(result)
 
 
@@ -223,7 +250,7 @@ async def test_query_tool_rejects_mutually_exclusive_arguments(mcp_env: str) -> 
             {"query": "alpha", "searches": [{"type": "lex", "query": "alpha"}]},
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "mutually exclusive" in _text_of(result)
 
 
@@ -236,7 +263,7 @@ async def test_query_tool_rejects_negation_in_a_vec_sub_query(mcp_env: str) -> N
             "query", {"searches": [{"type": "vec", "query": "sports -baseball"}]}
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     text = _text_of(result)
     assert "vec: Negation (-term) is not supported" in text
 
@@ -251,18 +278,18 @@ async def test_query_tool_rejects_multiline_lex_sub_query(mcp_env: str) -> None:
             "query", {"searches": [{"type": "lex", "query": "alpha\nbeta"}]}
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "must be a single line" in _text_of(result)
 
 
 async def test_document_resource_reads_slash_spanning_path(mcp_env: str) -> None:
-    """The whole reason the resource bypasses FastMCP's @mcp.resource()
+    """The whole reason the resource bypasses MCPServer's @mcp.resource()
     decorator: its template matching can't express a path segment
     containing slashes."""
     await _seed_documents()
     async with _client() as session:
         await session.initialize()
-        result = await session.read_resource(AnyUrl("marq://docs/notes/alpha.md"))
+        result = await session.read_resource("marq://docs/notes/alpha.md")
 
     assert len(result.contents) == 1
     contents = result.contents[0]
@@ -282,7 +309,7 @@ async def test_document_resource_percent_decodes_path(mcp_env: str) -> None:
 
     async with _client() as session:
         await session.initialize()
-        result = await session.read_resource(AnyUrl("marq://docs/my%20file.md"))
+        result = await session.read_resource("marq://docs/my%20file.md")
 
     contents = result.contents[0]
     assert isinstance(contents, TextResourceContents)
@@ -293,7 +320,7 @@ async def test_document_resource_missing_document_reports_not_found(mcp_env: str
     await _seed_documents()
     async with _client() as session:
         await session.initialize()
-        result = await session.read_resource(AnyUrl("marq://docs/notes/ghost.md"))
+        result = await session.read_resource("marq://docs/notes/ghost.md")
 
     contents = result.contents[0]
     assert isinstance(contents, TextResourceContents)
