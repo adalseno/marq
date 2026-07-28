@@ -85,7 +85,7 @@ required; see `.env.example` for a production-style template or
 |----------------------------|-------------------------------------|-------------------------------------------|
 | `MARQ_POSTGRES_URL`       | *(required)*                       | `postgresql+psycopg://user:pass@host/db` |
 | `MARQ_POSTGRES_SCHEMA`    | `qmd_py`                           | Postgres schema marq's tables live in    |
-| `MARQ_LLM_BASE_URL`       | `http://ubuserver.internal:8099`   | OpenAI-style embed/chat/rerank endpoint  |
+| `MARQ_LLM_BASE_URL`       | `http://localhost:8099`            | OpenAI-style embed/chat/rerank endpoint  |
 | `MARQ_EMBED_MODEL`        | `bge-m3-q8_0`                      |                                            |
 | `MARQ_GENERATE_MODEL`     | `qwen2.5-3b-instruct-q4_k_m`       | Used for query expansion                 |
 | `MARQ_RERANK_MODEL`       | `qwen3-reranker-0.6b-q8_0`         |                                            |

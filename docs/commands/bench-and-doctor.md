@@ -76,7 +76,7 @@ $ uv run marq doctor
 marq doctor
 
 Postgres schema: qmd_py
-LLM router: http://ubuserver.internal:8099
+LLM router: http://localhost:8099
 
 ✓ Postgres connectivity: PostgreSQL 16.14 (Debian 16.14-1.pgdg12+1) on x86_64-pc-linux-gnu, ...
 ✓ pgvector extension: 0.8.5
@@ -91,7 +91,7 @@ LLM router: http://ubuserver.internal:8099
 Effective configuration:
   MARQ_POSTGRES_URL       postgresql+psycopg://qmd:***@localhost:5433/qmd
   MARQ_POSTGRES_SCHEMA    qmd_py
-  MARQ_LLM_BASE_URL       http://ubuserver.internal:8099
+  MARQ_LLM_BASE_URL       http://localhost:8099
   MARQ_EMBED_MODEL        bge-m3-q8_0
   MARQ_GENERATE_MODEL     qwen2.5-3b-instruct-q4_k_m
   MARQ_RERANK_MODEL       qwen3-reranker-0.6b-q8_0

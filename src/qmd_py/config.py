@@ -29,7 +29,15 @@ class Settings(BaseSettings):
 
     postgres_schema: str = "qmd_py"
 
-    llm_base_url: str = "http://ubuserver.internal:8099"
+    llm_base_url: str = "http://localhost:8099"
+    """A localhost placeholder, not a real router. Deliberately not a
+    required setting: the LLM is only needed by
+    `query`/`vsearch`/`embed`/`doctor`, and making it required would stop
+    `status`/`ls`/`get`/`search` working for someone with no router at
+    all. Pointing at localhost means an unconfigured install fails with
+    an obvious connection-refused on its own machine, rather than a
+    confusing timeout against a host that only exists on this project
+    author's network - see `llm-stack/README.md` to run one locally."""
 
     embed_model: str = "bge-m3-q8_0"
     rerank_model: str = "qwen3-reranker-0.6b-q8_0"

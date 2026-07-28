@@ -59,7 +59,8 @@ schema (not schema-per-collection or similar) was the right call.
 
 ### `MARQ_LLM_BASE_URL` {: #marq_llm_base_url }
 
-Default: `http://ubuserver.internal:8099`.
+Default: `http://localhost:8099` — a placeholder, not a router that
+exists. Set this to wherever yours actually runs.
 
 An OpenAI-style HTTP endpoint serving embeddings (`/v1/embeddings`),
 chat completions (`/v1/chat/completions`, used for query expansion),
