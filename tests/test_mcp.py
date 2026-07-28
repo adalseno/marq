@@ -15,11 +15,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmd_py.auth import CurrentUser
+from qmd_py.cli.commands.mcp import _warn_if_public_bind
 from qmd_py.mcp.server import (
     _default_collection_names,
     _encode_qmd_path,
     _filter_by_collections,
     _format_search_summary,
+    _is_int,
     _parse_get_lookup,
     _round2,
     build_instructions,
@@ -29,6 +31,38 @@ from qmd_py.store import add_collection, insert_content, insert_document, utcnow
 
 def test_encode_qmd_path_preserves_slashes_encodes_segments() -> None:
     assert _encode_qmd_path("docs/my file.md") == "docs/my%20file.md"
+
+
+def test_is_int_rejects_json_booleans() -> None:
+    """Python's bool subclasses int, so a bare isinstance(x, int) accepts
+    JSON true/false - the fence must not (third review, finding 8)."""
+    assert _is_int(10)
+    assert _is_int(0)
+    assert not _is_int(True)
+    assert not _is_int(False)
+    assert not _is_int(1.5)
+    assert not _is_int("10")
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "127.1.2.3", "localhost", "::1"])
+def test_warn_if_public_bind_is_silent_for_loopback(
+    host: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _warn_if_public_bind(host)
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "::"])  # noqa: S104
+def test_warn_if_public_bind_warns_for_non_loopback(
+    host: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Until real ACL lands, a public bind means unauthenticated access to
+    every indexed document - the startup warning is the guard rail against
+    doing that by accident (third review, finding 9)."""
+    _warn_if_public_bind(host)
+    err = capsys.readouterr().err
+    assert "Warning" in err
+    assert "NO authentication" in err.replace("\n", " ")
 
 
 def test_round2_rounds_to_two_decimals() -> None:

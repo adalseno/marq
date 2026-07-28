@@ -74,6 +74,25 @@ def _start_daemon(host: str, port: int) -> None:
     click.echo(f"Logs: {_LOG_FILE}")
 
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "::1"})
+
+
+def _warn_if_public_bind(host: str) -> None:
+    """The HTTP transport has no authentication and `can_access()` is
+    mocked to allow everything, so a non-loopback bind hands every
+    indexed document to anyone who can reach the port. Warn rather than
+    refuse - exposing it may be deliberate on a trusted network - until
+    real ACL (and with it a bearer-token check) lands."""
+    if host in _LOOPBACK_HOSTS or host.startswith("127."):
+        return
+    click.echo(
+        f"Warning: binding {host} exposes the whole index over plain HTTP with NO "
+        "authentication - anyone who can reach the port can read every indexed "
+        "document. Use --host 127.0.0.1 unless this is a trusted network.",
+        err=True,
+    )
+
+
 @click.group("mcp", invoke_without_command=True)
 @click.option("--http", is_flag=True, help="Use Streamable HTTP transport instead of stdio")
 @click.option("--port", type=int, default=8181, show_default=True, help="HTTP port")
@@ -86,6 +105,8 @@ def mcp_group(ctx: click.Context, http: bool, port: int, host: str, daemon: bool
         return
     if daemon and not http:
         raise click.UsageError("--daemon requires --http")
+    if http:
+        _warn_if_public_bind(host)
     if daemon:
         _start_daemon(host, port)
     elif http:

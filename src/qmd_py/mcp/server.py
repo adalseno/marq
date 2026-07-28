@@ -720,6 +720,13 @@ def _register_document_resource(mcp: FastMCP) -> None:
 # =============================================================================
 
 
+def _is_int(value: Any) -> bool:
+    """`isinstance(x, int)` alone accepts JSON true/false (Python's bool
+    subclasses int), so `"limit": true` would quietly run with limit 1 -
+    this is the standard fence."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _register_rest_routes(mcp: FastMCP, start_time: float, llm_client: LlmClient) -> None:
     from starlette.requests import Request
     from starlette.responses import JSONResponse
@@ -762,12 +769,14 @@ def _register_rest_routes(mcp: FastMCP, start_time: float, llm_client: LlmClient
             llm_client=llm_client,
             query=None,
             searches=searches,
-            limit=params["limit"] if isinstance(params.get("limit"), int) else 10,
+            limit=params["limit"] if _is_int(params.get("limit")) else 10,
             min_score=(
-                params["minScore"] if isinstance(params.get("minScore"), int | float) else 0.0
+                params["minScore"]
+                if _is_int(params.get("minScore")) or isinstance(params.get("minScore"), float)
+                else 0.0
             ),
             candidate_limit=(
-                params["candidateLimit"] if isinstance(params.get("candidateLimit"), int) else None
+                params["candidateLimit"] if _is_int(params.get("candidateLimit")) else None
             ),
             collections=collections,
             intent=intent,

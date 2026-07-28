@@ -300,6 +300,29 @@ async def test_document_resource_missing_document_reports_not_found(mcp_env: str
     assert "Document not found" in contents.text
 
 
+async def test_rest_query_ignores_json_booleans_in_integer_params(mcp_env: str) -> None:
+    """Regression for the third review's finding 8: Python's bool
+    subclasses int, so `"limit": true` passed the isinstance(int) guard
+    and quietly ran with limit 1. A boolean must fall back to the
+    default instead of masquerading as an integer."""
+    await _seed_documents()
+    server = await create_mcp_server(http=True)
+    transport = httpx.ASGITransport(app=server.streamable_http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/query",
+            json={
+                "searches": [{"type": "lex", "query": "unique"}],
+                "limit": True,
+                "rerank": False,
+            },
+        )
+
+    assert response.status_code == 200
+    # Both seeded documents match; a limit of true-as-1 would return one.
+    assert len(response.json()["results"]) == 2
+
+
 async def test_rest_query_rejects_malformed_searches_with_400(mcp_env: str) -> None:
     """Regression: a non-dict `searches` entry (AttributeError) or an
     invalid `type` value (pydantic ValidationError) used to escape the
