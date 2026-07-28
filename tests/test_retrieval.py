@@ -71,6 +71,30 @@ async def test_find_document_by_collection_prefixed_display_path(
     assert result.display_path == "docs/notes/alpha.md"
 
 
+async def test_find_document_by_bare_filename_suffix(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """A bare filename is a valid partial path - the suffix match resolves
+    it at the segment boundary."""
+    await _seed(session, user)
+    result = await find_document(session, user, "alpha.md")
+    assert isinstance(result, DocumentDetail)
+    assert result.display_path == "docs/notes/alpha.md"
+
+
+async def test_find_document_suffix_match_stops_at_segment_boundary(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """Regression for the third review's finding 4: the suffix match used
+    a bare endswith, so `pha.md` silently resolved to notes/alpha.md
+    mid-filename when no file was literally named that. A partial path
+    must only match whole trailing segments; the mid-filename form is an
+    honest miss."""
+    await _seed(session, user)
+    result = await find_document(session, user, "pha.md")
+    assert isinstance(result, DocumentNotFound)
+
+
 async def test_find_document_by_docid(session: AsyncSession, user: CurrentUser) -> None:
     await _seed(session, user)
     result = await find_document(session, user, "#a1a1a1a1a1")

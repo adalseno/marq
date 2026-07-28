@@ -84,7 +84,13 @@ def _match_named_document(
     then a suffix match against the full virtual path (`marq://coll/path`,
     not just the bare path - so e.g. "sample/src/foo.py" or a partial
     "src/foo.py" both resolve) - in that order, first match wins, same as
-    the TS reference's `findDocument`."""
+    the TS reference's `findDocument`.
+
+    The suffix match requires a `/` segment boundary - a deliberate
+    behavior improvement over the TS reference, whose bare `endsWith`
+    lets `o.py` silently resolve to `src/foo.py` mid-filename. Every
+    documented partial-path form still works; a genuine miss falls
+    through to the caller's "did you mean" suggestions."""
     parsed = parse_virtual_path(name) if is_virtual_path(name) else None
     if parsed is not None:
         target_collection, path = parsed
@@ -97,7 +103,7 @@ def _match_named_document(
         if document.path == name:
             return document, coll_name
     for document, coll_name in refs:
-        if f"marq://{coll_name}/{document.path}".endswith(name):
+        if f"marq://{coll_name}/{document.path}".endswith(f"/{name}"):
             return document, coll_name
     return None
 
