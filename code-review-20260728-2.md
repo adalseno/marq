@@ -8,8 +8,9 @@ skip paths, the daemon rework) and their interactions — do the fixes
 introduce new bugs or uncovered edge cases — plus the requested final
 verdict: is the project ready for an alpha deployment?*
 
-*Resolved same day: findings 1–3 first, then the three minor polish
-items, each with a regression test. Nothing from this pass is left open.*
+*Resolved same day in two commits: findings 1–3 in `b2e54a1`, then the
+three minor polish items in `1c43b5c`, each with a regression test.
+Nothing from this pass is left open.*
 
 ## Outcome
 
@@ -17,12 +18,12 @@ Three findings and three polish items, all closed:
 
 | # | Finding | Resolution |
 |---|---------|------------|
-| 1 | Oversize cap counts characters, tsvector cap is bytes; `collection add` still strands a committed empty collection on a reindex crash | **Fixed** — `MAX_INDEXABLE_CHARS` became `MAX_INDEXABLE_BYTES`, measured against the UTF-8 encoding; `_collection_add_impl` now catches `OSError`/`SQLAlchemyError` around the initial reindex, removes the just-created collection, and exits 1 with "Collection '…' was not created" |
-| 2 | Empty-file skip warns on healthy input | **Fixed** — demoted to DEBUG; docstring realigned with the logging that actually exists |
-| 3 | `pytest>=8.0` floor predates non-propagating-logger capture | **Fixed** — floor bumped to `pytest>=8.4`, with the reason recorded next to the constraint |
-| P1 | A failed rerank still logs `reranked=yes` | **Fixed** — the except branch sets `timing["reranked"] = "failed"` |
-| P2 | REST `/query` accepts a negative `limit`, dropping results off the end | **Fixed** — clamped with `max(0, limit)` in `_run_query_search`, which covers the `query` tool as well as the REST route |
-| P3 | `mcp-stdio.log` truncation wipes a crashed daemon's traceback | **Fixed** — the previous file is rotated to `mcp-stdio.log.1` before truncation |
+| 1 | Oversize cap counts characters, tsvector cap is bytes; `collection add` still strands a committed empty collection on a reindex crash | **Fixed** `b2e54a1` — `MAX_INDEXABLE_CHARS` became `MAX_INDEXABLE_BYTES`, measured against the UTF-8 encoding; `_collection_add_impl` now catches `OSError`/`SQLAlchemyError` around the initial reindex, removes the just-created collection, and exits 1 with "Collection '…' was not created" |
+| 2 | Empty-file skip warns on healthy input | **Fixed** `b2e54a1` — demoted to DEBUG; docstring realigned with the logging that actually exists |
+| 3 | `pytest>=8.0` floor predates non-propagating-logger capture | **Fixed** `b2e54a1` — floor bumped to `pytest>=8.4`, with the reason recorded next to the constraint |
+| P1 | A failed rerank still logs `reranked=yes` | **Fixed** `1c43b5c` — the except branch sets `timing["reranked"] = "failed"` |
+| P2 | REST `/query` accepts a negative `limit`, dropping results off the end | **Fixed** `1c43b5c` — clamped with `max(0, limit)` in `_run_query_search`, which covers the `query` tool as well as the REST route |
+| P3 | `mcp-stdio.log` truncation wipes a crashed daemon's traceback | **Fixed** `1c43b5c` — the previous file is rotated to `mcp-stdio.log.1` before truncation |
 
 ## Findings in detail
 
@@ -86,7 +87,7 @@ Three findings and three polish items, all closed:
 ## Minor polish (filed as optional, then done anyway)
 
 All three were one-liners with a cheap test each, so they were taken
-rather than deferred:
+rather than deferred — together in `1c43b5c`:
 
 - **P1.** `hybrid.py` set `timing["reranked"] = "yes"` *before* the
   rerank attempt, so a failed rerank's INFO line still said
@@ -158,11 +159,11 @@ bind). The watchlist is scale-dependent debt, correctly deferred.
   finding 3 with a scratch test proving `caplog` misses records through
   a mid-test `propagate = False`, plus inspection of the installed
   pytest's `catching_logs`.
-- Post-fix: `tests/test_indexing.py` plus the two `collection add` CLI
-  tests — **13 passed** against real Postgres; `ruff` and `mypy` clean;
-  full suite re-run **422 passed** (including integration) with the
-  fixes in place.
-- After the three polish items: full suite **424 passed** at **93%**
+- Post-fix (`b2e54a1`): `tests/test_indexing.py` plus the two
+  `collection add` CLI tests — **13 passed** against real Postgres;
+  `ruff` and `mypy` clean; full suite re-run **422 passed** (including
+  integration) with the fixes in place.
+- After the three polish items (`1c43b5c`): full suite **424 passed** at **93%**
   coverage (`uv run pytest --cov=qmd_py`, integration included),
   `ruff check` and `mypy src alembic tests` clean, `zensical build
   --strict` reporting no issues. `devs/COVERAGE.md` refreshed to match.
