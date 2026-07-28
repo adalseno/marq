@@ -6,6 +6,7 @@ TS reference's hybridQuery/reciprocalRankFusion/expandQuery/rerank
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, replace
 from typing import Any
@@ -562,9 +563,14 @@ async def hybrid_query(
         # query, even though the fused candidates were already in hand -
         # the same misbehavior expand_query() degrades on, so degrade the
         # same way here rather than losing good-enough results.
-        doc_texts = [
-            await _rerank_safe_text(llm_client, text, rerank_model) for _, text in chunks_to_rerank
-        ]
+        # The truncation probes are independent /tokenize round trips
+        # (AsyncClient is concurrency-safe) - run them concurrently
+        # instead of paying up to candidate_limit sequential calls.
+        doc_texts = list(
+            await asyncio.gather(
+                *(_rerank_safe_text(llm_client, text, rerank_model) for _, text in chunks_to_rerank)
+            )
+        )
         rerank_scores = await llm_client.rerank(rerank_query, doc_texts, rerank_model)
     except (httpx.HTTPError, IndexError, KeyError, ValueError, TypeError):
         return _rrf_only_results()
