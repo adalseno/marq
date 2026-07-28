@@ -21,7 +21,7 @@ import httpx
 import pytest
 from mcp.client.session import ClientSession
 from mcp.shared.memory import create_connected_server_and_client_session
-from mcp.types import EmbeddedResource, TextContent, TextResourceContents
+from mcp.types import CallToolResult, EmbeddedResource, TextContent, TextResourceContents
 from pydantic import AnyUrl
 
 from qmd_py.auth import get_current_user
@@ -54,11 +54,11 @@ async def _client() -> AsyncIterator[ClientSession]:
         yield session
 
 
-def _text_of(result: object) -> str:
+def _text_of(result: CallToolResult) -> str:
     """Flattens a CallToolResult's content blocks into one string, whether
     they arrived as plain text or as embedded document resources."""
     chunks = []
-    for block in result.content:  # type: ignore[attr-defined]
+    for block in result.content:
         if isinstance(block, TextContent):
             chunks.append(block.text)
         elif isinstance(block, EmbeddedResource) and isinstance(
