@@ -43,7 +43,7 @@ from mcp.types import (
     TextResourceContents,
     ToolAnnotations,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from qmd_py.auth import CurrentUser, get_current_user
 from qmd_py.cli.snippet import extract_snippet
@@ -730,9 +730,16 @@ def _register_rest_routes(mcp: FastMCP, start_time: float) -> None:
             return JSONResponse(
                 {"error": "Missing required field: searches (array)"}, status_code=400
             )
-        searches = [
-            SubSearch(type=s.get("type"), query=str(s.get("query") or "")) for s in raw_searches
-        ]
+        try:
+            searches = [
+                SubSearch(type=s.get("type"), query=str(s.get("query") or ""))
+                for s in raw_searches
+            ]
+        except (ValidationError, AttributeError, TypeError):
+            return JSONResponse(
+                {"error": "Each searches entry must be an object with a valid type (lex/vec/hyde)"},
+                status_code=400,
+            )
         invalid = validate_typed_queries([ExpandedQuery(s.type, s.query) for s in searches])
         if invalid is not None:
             return JSONResponse({"error": invalid}, status_code=400)

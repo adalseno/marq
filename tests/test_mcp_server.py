@@ -17,6 +17,7 @@ by test_hybrid.py.
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 import pytest
 from mcp.client.session import ClientSession
 from mcp.shared.memory import create_connected_server_and_client_session
@@ -297,3 +298,23 @@ async def test_document_resource_missing_document_reports_not_found(mcp_env: str
     contents = result.contents[0]
     assert isinstance(contents, TextResourceContents)
     assert "Document not found" in contents.text
+
+
+async def test_rest_query_rejects_malformed_searches_with_400(mcp_env: str) -> None:
+    """Regression: a non-dict `searches` entry (AttributeError) or an
+    invalid `type` value (pydantic ValidationError) used to escape the
+    handler and surface as a 500, unlike every other malformed-input path
+    in the same route."""
+    server = await create_mcp_server(http=True)
+    transport = httpx.ASGITransport(app=server.streamable_http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for body in (
+            {"searches": ["foo"]},
+            {"searches": [{"type": "nope", "query": "x"}]},
+            {"searches": [None]},
+            {"searches": "not-a-list"},
+            {},
+        ):
+            response = await client.post("/query", json=body)
+            assert response.status_code == 400, body
+            assert "error" in response.json()
