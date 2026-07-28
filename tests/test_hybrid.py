@@ -5,6 +5,7 @@ tests/fixtures/sample-collection - see conftest.py's `sample_collection`).
 """
 
 import json
+import logging
 from collections.abc import AsyncIterator
 
 import httpx
@@ -272,6 +273,22 @@ async def test_expand_query_falls_back_on_empty_choices() -> None:
     assert [q.query for q in expanded] == ["auth", "auth"]
 
 
+async def test_expand_query_fallback_logs_a_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The degrade must leave evidence: without it, a dead router and a
+    healthy one that simply found no variants look identical from the
+    outside. The line carries the exception, not the query text - queries
+    are user data (see log.py's privacy note)."""
+    with caplog.at_level(logging.WARNING, logger="qmd_py.search.hybrid"):
+        async with _mock_llm_client({"choices": []}) as client:
+            await expand_query(client, "secret-user-query", "gen")
+
+    assert "query expansion failed" in caplog.text
+    assert "IndexError" in caplog.text
+    assert "secret-user-query" not in caplog.text
+
+
 # =============================================================================
 # rerank degradation
 # =============================================================================
@@ -309,6 +326,37 @@ async def test_hybrid_query_falls_back_to_rrf_when_rerank_fails(
     # Pure 1/rrf_rank scores, exactly as --no-rerank produces.
     assert results[0].score == pytest.approx(1.0)
     assert [r.score for r in results] == sorted((r.score for r in results), reverse=True)
+
+
+@pytest.mark.integration
+async def test_hybrid_query_rerank_fallback_logs_a_warning(
+    session: AsyncSession,
+    user: CurrentUser,
+    sample_collection: Collection,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Same contract as the expansion fallback: today a dead router and a
+    token-budget bug both surface as silently worse results, so the
+    fallback must say which one happened."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rerank":
+            return httpx.Response(500, json={"error": "rerank exploded"})
+        if request.url.path == "/tokenize":
+            return httpx.Response(200, json={"tokens": [1, 2, 3]})
+        if request.url.path == "/v1/embeddings":
+            return _embeddings_response(request)
+        return httpx.Response(200, json=_chat_completion({"lex": "priority", "vec": "priority"}))
+
+    with caplog.at_level(logging.WARNING, logger="qmd_py.search.hybrid"):
+        async with LlmClient("http://router.invalid", transport=httpx.MockTransport(handler)) as c:
+            await hybrid_query(
+                session, user, "priority levels", c, _MODELS,
+                QueryOptions(collection_name="sample"),
+            )
+
+    assert "rerank failed" in caplog.text
+    assert "falling back to RRF ordering" in caplog.text
 
 
 @pytest.mark.integration

@@ -29,12 +29,32 @@ from qmd_py.cli.commands.write import (
     embed_command,
     update_command,
 )
+from qmd_py.config import get_settings
+from qmd_py.log import setup_logging
 
 
 @click.group()
 @click.version_option()
-def cli() -> None:
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    help="Log to stderr: -v for INFO (per-query timings, per-collection counts), -vv for DEBUG.",
+)
+def cli(verbose: int) -> None:
     """marq: centralized markdown/code search over Postgres/pgvector."""
+    # Settings are read lazily (and may be invalid - main() reports that
+    # below), so a -v/-vv flag must be able to configure logging without
+    # them. Without a flag, logging is configured from settings at the
+    # first command that touches them, or left at the WARNING default.
+    if verbose:
+        setup_logging("DEBUG" if verbose > 1 else "INFO", force=True)
+    else:
+        try:
+            settings = get_settings()
+        except ValidationError:
+            return
+        setup_logging(settings.log_level, settings.log_file)
 
 
 cli.add_command(search_command)

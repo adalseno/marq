@@ -8,6 +8,7 @@ old SQLite indexes, which doesn't apply to a from-scratch project.
 
 import fnmatch
 import glob as glob_module
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -26,6 +27,8 @@ from qmd_py.store.documents import (
     insert_document,
     update_document,
 )
+
+logger = logging.getLogger(__name__)
 
 _EXCLUDE_DIRS = frozenset({"node_modules", ".git", ".cache", "vendor", "dist", "build"})
 
@@ -204,12 +207,20 @@ async def reindex_collection(
             # fast-moving-worktree case this indexer supports) must count
             # as skipped, not raise FileNotFoundError.
             mtime = filepath.stat().st_mtime
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning("skipping %s: %s: %s", rel_path, type(exc).__name__, exc)
             continue
         if not content.strip():
+            logger.warning("skipping %s: file is empty or whitespace-only", rel_path)
             continue
         if len(content) > MAX_INDEXABLE_CHARS:
             skipped_oversize += 1
+            logger.warning(
+                "skipping %s: %d chars exceeds the %d-char index limit",
+                rel_path,
+                len(content),
+                MAX_INDEXABLE_CHARS,
+            )
             continue
         seen_paths.add(rel_path)
 

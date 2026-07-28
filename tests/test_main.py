@@ -5,10 +5,14 @@ against Postgres/the LLM router - so it's fair game for a direct unit
 test rather than live-only verification.
 """
 
+import logging
+import sys
+
 import pytest
+from click.testing import CliRunner
 from pydantic import ValidationError
 
-from qmd_py.cli.main import main
+from qmd_py.cli.main import cli, main
 from qmd_py.config import Settings
 
 
@@ -47,3 +51,31 @@ def test_main_lets_other_exceptions_propagate(monkeypatch: pytest.MonkeyPatch) -
 
     with pytest.raises(RuntimeError, match="something else entirely"):
         main()
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected_level"),
+    [([], logging.WARNING), (["-v"], logging.INFO), (["-vv"], logging.DEBUG)],
+)
+def test_verbose_flags_set_the_log_level(
+    flags: list[str], expected_level: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """-v/-vv are the no-environment escape hatch for one-off debugging;
+    without them the level comes from MARQ_LOG_LEVEL (WARNING by default)."""
+    monkeypatch.setattr(logging.getLogger("qmd_py"), "handlers", [])
+    # A real subcommand, not --help: click's --help is eager and exits
+    # before the group callback (where logging is configured) ever runs.
+    # `skills list` needs neither Postgres nor the router.
+    CliRunner().invoke(cli, [*flags, "skills", "list"])
+
+    assert logging.getLogger("qmd_py").level == expected_level
+
+
+def test_cli_never_logs_to_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """stdout carries parseable command output (--format json/csv), so a
+    log line there would corrupt a pipeline."""
+    monkeypatch.setattr(logging.getLogger("qmd_py"), "handlers", [])
+    CliRunner().invoke(cli, ["-vv", "skills", "list"])
+
+    for handler in logging.getLogger("qmd_py").handlers:
+        assert getattr(handler, "stream", None) is not sys.stdout

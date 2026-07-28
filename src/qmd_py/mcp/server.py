@@ -26,6 +26,7 @@ TS reference's actual JSON schema, not internal Python code.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -52,6 +53,7 @@ from qmd_py.cli.snippet import extract_snippet
 from qmd_py.config import get_settings
 from qmd_py.db.engine import get_session
 from qmd_py.llm.client import LlmClient
+from qmd_py.log import setup_logging
 from qmd_py.search.hybrid import (
     ExpandedQuery,
     ModelConfig,
@@ -71,6 +73,8 @@ from qmd_py.store import (
     list_collections,
     multi_get,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _encode_qmd_path(path: str) -> str:
@@ -399,6 +403,7 @@ def _register_query_tool(mcp: FastMCP, llm_client: LlmClient) -> None:
         ] = True,
     ) -> CallToolResult:
         if not query and not searches:
+            logger.warning("query tool rejected: neither 'query' nor 'searches' given")
             return CallToolResult(
                 content=[
                     TextContent(
@@ -410,6 +415,10 @@ def _register_query_tool(mcp: FastMCP, llm_client: LlmClient) -> None:
                 isError=True,
             )
         if query and searches:
+            logger.warning(
+                "query tool rejected: 'query' and %d 'searches' entries are mutually exclusive",
+                len(searches),
+            )
             return CallToolResult(
                 content=[
                     TextContent(
@@ -425,6 +434,7 @@ def _register_query_tool(mcp: FastMCP, llm_client: LlmClient) -> None:
                 [ExpandedQuery(s.type, s.query) for s in searches]
             )
             if invalid is not None:
+                logger.warning("query tool rejected: %s", invalid)
                 return CallToolResult(
                     content=[TextContent(type="text", text=f"Error: {invalid}")],
                     isError=True,
@@ -739,10 +749,16 @@ def _register_rest_routes(mcp: FastMCP, start_time: float, llm_client: LlmClient
         try:
             params = await request.json()
         except ValueError:
+            logger.warning("REST /query rejected: body is not valid JSON")
             return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
         raw_searches = params.get("searches")
         if not isinstance(raw_searches, list):
+            # Payload *shape* only - the query text is user data (see log.py).
+            logger.warning(
+                "REST /query rejected: 'searches' is %s, expected array",
+                type(raw_searches).__name__,
+            )
             return JSONResponse(
                 {"error": "Missing required field: searches (array)"}, status_code=400
             )
@@ -751,13 +767,19 @@ def _register_rest_routes(mcp: FastMCP, start_time: float, llm_client: LlmClient
                 SubSearch(type=s.get("type"), query=str(s.get("query") or ""))
                 for s in raw_searches
             ]
-        except (ValidationError, AttributeError, TypeError):
+        except (ValidationError, AttributeError, TypeError) as exc:
+            logger.warning(
+                "REST /query rejected: malformed 'searches' entry among %d (%s)",
+                len(raw_searches),
+                type(exc).__name__,
+            )
             return JSONResponse(
                 {"error": "Each searches entry must be an object with a valid type (lex/vec/hyde)"},
                 status_code=400,
             )
         invalid = validate_typed_queries([ExpandedQuery(s.type, s.query) for s in searches])
         if invalid is not None:
+            logger.warning("REST /query rejected: %s", invalid)
             return JSONResponse({"error": invalid}, status_code=400)
         raw_collections = params.get("collections")
         collections = (
@@ -818,6 +840,12 @@ async def create_mcp_server(
         A configured `FastMCP`, ready for either transport.
     """
     settings = get_settings()
+    # Never stdout: the stdio transport *is* JSON-RPC over stdout, so a
+    # stray log line corrupts the protocol. setup_logging only ever
+    # writes to stderr or a file, and is idempotent, so this is safe
+    # whether or not the CLI entry point already configured it.
+    setup_logging(settings.log_level, settings.log_file)
+
     async with get_session() as session:
         user = await get_current_user(session)
         await session.commit()

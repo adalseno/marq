@@ -3,6 +3,7 @@ cleanup, context - ports of the TS reference's `src/cli/qmd.ts` command
 handlers, adapted to qmd-py's real Collection ownership (no YAML config).
 """
 
+import logging
 import subprocess
 from pathlib import Path
 
@@ -40,6 +41,8 @@ from qmd_py.store import (
 )
 from qmd_py.store import add_collection as store_add_collection
 from qmd_py.vpath import parse_virtual_path
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_context_path(path: str) -> tuple[str, str]:
@@ -292,6 +295,11 @@ async def _update_impl(session: AsyncSession, user: CurrentUser) -> None:
                     timeout=_UPDATE_COMMAND_TIMEOUT,
                 )
             except subprocess.TimeoutExpired:
+                logger.warning(
+                    "update command for collection %s timed out after %ds",
+                    row.name,
+                    _UPDATE_COMMAND_TIMEOUT,
+                )
                 click.echo(
                     f"✗ Update command timed out after {_UPDATE_COMMAND_TIMEOUT}s", err=True
                 )
@@ -305,6 +313,15 @@ async def _update_impl(session: AsyncSession, user: CurrentUser) -> None:
             for line in proc.stderr.splitlines():
                 click.echo(f"    {line}")
             if proc.returncode != 0:
+                # The console summary shows the command's output inline,
+                # but a cron run only keeps what the log kept.
+                logger.warning(
+                    "update command for collection %s exited %d\nstdout:\n%s\nstderr:\n%s",
+                    row.name,
+                    proc.returncode,
+                    proc.stdout.strip(),
+                    proc.stderr.strip(),
+                )
                 click.echo(f"✗ Update command failed with exit code {proc.returncode}", err=True)
                 failures.append((row.name, f"update command exited {proc.returncode}"))
                 click.echo()
@@ -319,6 +336,9 @@ async def _update_impl(session: AsyncSession, user: CurrentUser) -> None:
             # (the oversized-tsvector class of failure) - either way, one
             # broken collection shouldn't strand the others.
             await session.rollback()
+            logger.warning(
+                "reindex of collection %s failed: %s: %s", row.name, type(exc).__name__, exc
+            )
             click.echo(f"✗ Reindex failed: {exc}", err=True)
             failures.append((row.name, f"reindex failed: {exc}"))
             click.echo()

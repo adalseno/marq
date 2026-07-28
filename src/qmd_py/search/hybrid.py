@@ -7,6 +7,7 @@ TS reference's hybridQuery/reciprocalRankFusion/expandQuery/rerank
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass, replace
 from typing import Any
@@ -20,6 +21,8 @@ from qmd_py.config import Settings
 from qmd_py.llm.client import LlmClient, format_query_for_embedding
 from qmd_py.search.fts import search_fts, validate_lex_query, validate_semantic_query
 from qmd_py.search.vector import chunk_document, has_embeddings_table, search_vec
+
+logger = logging.getLogger(__name__)
 
 # Ported constants (src/store.ts) - a strong BM25 signal skips the
 # (comparatively expensive) query-expansion LLM call entirely.
@@ -175,10 +178,15 @@ async def expand_query(
             model=model,
             json_schema=_EXPAND_JSON_SCHEMA,
         )
-    except (httpx.HTTPError, IndexError, KeyError, ValueError, TypeError):
+    except (httpx.HTTPError, IndexError, KeyError, ValueError, TypeError) as exc:
         # IndexError included because chat_json subscripts choices[0]: a
         # router answering {"choices": []} is exactly the misbehavior this
         # fallback exists for, and it used to escape and fail the search.
+        logger.warning(
+            "query expansion failed (%s: %s), falling back to unexpanded lex+vec search",
+            type(exc).__name__,
+            exc,
+        )
         return [ExpandedQuery("lex", query), ExpandedQuery("vec", query)]
 
     expanded = []
@@ -587,7 +595,15 @@ async def hybrid_query(
             )
         )
         rerank_scores = await llm_client.rerank(rerank_query, doc_texts, rerank_model)
-    except (httpx.HTTPError, IndexError, KeyError, ValueError, TypeError):
+    except (httpx.HTTPError, IndexError, KeyError, ValueError, TypeError) as exc:
+        # Without this line a dead router and a token-budget bug look
+        # identical from the outside: silently worse results.
+        logger.warning(
+            "rerank failed for %d candidate(s) (%s: %s), falling back to RRF ordering",
+            len(chunks_to_rerank),
+            type(exc).__name__,
+            exc,
+        )
         return _rrf_only_results()
 
     blended = []

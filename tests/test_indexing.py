@@ -3,6 +3,7 @@ backing `collection add` and `update`, against a real scratch Postgres
 schema (see conftest.py) and real temp directories.
 """
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -203,6 +204,33 @@ async def test_reindex_collection_skips_and_counts_oversized_files(
     assert second.skipped_oversize == 1
     assert second.removed == 1
     assert await get_active_document_paths(session, collection.id) == ["good.md"]
+
+
+async def test_reindex_collection_logs_a_warning_per_skipped_file(
+    tmp_path: Path,
+    session: AsyncSession,
+    user: CurrentUser,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Skipped files are the reindexer's silent degrade path - a document
+    missing from search results with no explanation anywhere. Each skip
+    logs its path and reason once."""
+    (tmp_path / "good.md").write_text("# Good\n\nreal body")
+    (tmp_path / "binary.md").write_bytes(b"\xff\xfe\x00binary garbage")
+    (tmp_path / "blank.md").write_text("   \n\n  ")
+    (tmp_path / "huge.md").write_text("# Huge\n\n" + "tok ".join(str(n) for n in range(300_000)))
+    await add_collection(session, user, "noisy", str(tmp_path), "**/*.md")
+    await session.commit()
+
+    with caplog.at_level(logging.WARNING, logger="qmd_py.store.indexing"):
+        await reindex_collection(session, user, "noisy")
+    await session.commit()
+
+    assert "skipping binary.md: UnicodeDecodeError" in caplog.text
+    assert "skipping blank.md: file is empty or whitespace-only" in caplog.text
+    assert "skipping huge.md" in caplog.text
+    assert "exceeds the 1000000-char index limit" in caplog.text
+    assert "good.md" not in caplog.text
 
 
 async def test_reindex_collection_shares_content_between_duplicate_files(

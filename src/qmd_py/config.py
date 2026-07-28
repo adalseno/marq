@@ -8,6 +8,7 @@ Isolation from the TS tables (which live in `public`) comes from the
 """
 
 from functools import lru_cache
+from pathlib import Path
 from urllib.parse import quote
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -49,6 +50,18 @@ class Settings(BaseSettings):
 
     default_user_email: str = "local@marq.local"
     """Identifies the single mocked user (see auth.py). Created on first use."""
+
+    log_level: str = "WARNING"
+    """DEBUG/INFO/WARNING/ERROR/CRITICAL. The default is silent on a
+    healthy run - a non-empty log means something actually degraded (see
+    `log.py`). INFO is the sensible level for a long-running MCP daemon;
+    the CLI's `-v`/`-vv` flags override this per invocation."""
+
+    log_file: Path | None = None
+    """Log to this size-rotated file instead of stderr. Unset means
+    stderr, which is what the CLI and the stdio MCP transport want -
+    never stdout, which carries parseable output and JSON-RPC
+    respectively."""
 
     @property
     def sqlalchemy_url(self) -> str:
