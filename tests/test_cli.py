@@ -291,6 +291,35 @@ def test_update_reindexes_changed_files(marq: Marq, tmp_path: Path) -> None:
     assert "gamma.md" in marq("search", "unique-gamma-token").output
 
 
+def test_update_continues_past_a_failing_update_command(marq: Marq, tmp_path: Path) -> None:
+    """Regression: the first failing update command used to abort the
+    whole run, so every collection after it silently went unindexed -
+    bad for the cron-style usage this command invites. It must now
+    reindex the rest and report the failure at the end, still non-zero.
+
+    Collections are listed by name, so "a-broken" is processed first.
+    """
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    _write_collection(broken)
+    healthy = tmp_path / "healthy"
+    healthy.mkdir()
+    (healthy / "notes").mkdir()
+    (healthy / "notes" / "later.md").write_text("# Later\n\nunique-later-token\n")
+
+    marq("collection", "add", str(broken), "--name", "a-broken", "--mask", "**/*.md")
+    marq("collection", "add", str(healthy), "--name", "b-healthy", "--mask", "**/*.md")
+    marq("collection", "update-cmd", "a-broken", "exit", "3")
+
+    (healthy / "notes" / "newer.md").write_text("# Newer\n\nunique-newer-token\n")
+    result = marq("update")
+
+    assert result.exit_code == 1, result.output
+    assert "a-broken" in result.output
+    # The collection after the failing one was still reindexed.
+    assert "unique-newer-token" in marq("search", "unique-newer-token").output
+
+
 def test_cleanup_runs_and_reports(marq: Marq, tmp_path: Path) -> None:
     _write_collection(tmp_path)
     marq("collection", "add", str(tmp_path), "--name", "docs", "--mask", "**/*.md")

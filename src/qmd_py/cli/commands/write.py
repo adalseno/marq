@@ -244,11 +244,21 @@ def update_command() -> None:
 
 
 async def _update_impl(session: AsyncSession, user: CurrentUser) -> None:
+    """One collection's failure doesn't abort the rest.
+
+    This command invites cron-style usage, where aborting on the first
+    failing update command would silently leave every later collection
+    unindexed. Failures are collected and reported together at the end,
+    and the exit code is still non-zero so a wrapper can react. A
+    collection whose update command failed is not reindexed - its source
+    tree may be half-updated - but the following ones still are.
+    """
     rows = await list_collections(session, user)
     if not rows:
         click.echo("No collections found. Run 'marq collection add .' to index files.")
         return
 
+    failures: list[tuple[str, str]] = []
     click.echo(f"Updating {len(rows)} collection(s)...\n")
     for i, row in enumerate(rows, start=1):
         click.echo(f"[{i}/{len(rows)}] {row.name} ({row.pattern})")
@@ -270,10 +280,22 @@ async def _update_impl(session: AsyncSession, user: CurrentUser) -> None:
                 click.echo(f"    {line}")
             if proc.returncode != 0:
                 click.echo(f"✗ Update command failed with exit code {proc.returncode}", err=True)
-                raise SystemExit(proc.returncode)
+                failures.append((row.name, f"update command exited {proc.returncode}"))
+                click.echo()
+                continue
 
-        result = await reindex_collection(session, user, row.name)
-        await session.commit()
+        try:
+            result = await reindex_collection(session, user, row.name)
+            await session.commit()
+        except OSError as exc:
+            # Realistically a vanished/unreadable source directory - one
+            # unreachable collection shouldn't strand the others either.
+            await session.rollback()
+            click.echo(f"✗ Reindex failed: {exc}", err=True)
+            failures.append((row.name, f"reindex failed: {exc}"))
+            click.echo()
+            continue
+
         click.echo(
             f"Indexed: {result.indexed} new, {result.updated} updated, "
             f"{result.unchanged} unchanged, {result.removed} removed"
@@ -281,6 +303,12 @@ async def _update_impl(session: AsyncSession, user: CurrentUser) -> None:
         if result.orphaned_cleaned:
             click.echo(f"Cleaned up {result.orphaned_cleaned} orphaned content hash(es)")
         click.echo()
+
+    if failures:
+        click.echo(f"✗ {len(failures)} of {len(rows)} collection(s) failed:", err=True)
+        for name, reason in failures:
+            click.echo(f"    {name}: {reason}", err=True)
+        raise SystemExit(1)
 
     click.echo("✓ All collections updated.")
 
