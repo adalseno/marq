@@ -3,9 +3,9 @@
 Snapshot of the test suite's coverage of `src/qmd_py`, committed so the
 project's real state is visible without cloning and running anything.
 
-**387 tests, 91% line coverage** — of those, **253 need no infrastructure
-at all** and run in about a second (`uv run pytest -m "not integration"`).
-The remaining 134 are integration tests hitting a real Postgres and a real
+**420 tests, 92% line coverage** — of those, **275 need no infrastructure
+at all** and run in about ten seconds (`uv run pytest -m "not integration"`).
+The remaining 145 are integration tests hitting a real Postgres and a real
 LLM router; see [CLAUDE.md](../CLAUDE.md) for the testing conventions.
 
 > [!NOTE]
@@ -26,20 +26,21 @@ LLM router; see [CLAUDE.md](../CLAUDE.md) for the testing conventions.
 
 The uncovered code is concentrated and deliberate rather than accidental:
 
-- **`cli/commands/mcp.py` (31%)** — daemon start/stop. Exercising it means
-  really spawning and killing background processes.
+- **`cli/commands/mcp.py` (36%)** — daemon start/stop. Exercising it means
+  really spawning and killing background processes (done by hand: see the
+  third review's resolution record).
 - **`cli/commands/bench.py` (47%)** — the thin click wrapper around the
   benchmark runner; `bench.py` itself is at 93%.
-- **`mcp/server.py` (84%)** — the remainder is the REST routes, which only
+- **`mcp/server.py` (90%)** — the remainder is the REST routes, which only
   get registered under `marq mcp --http`. Their malformed-input handling
   is now covered (a `/query` 400 regression test driving the real ASGI
   app); what's left is the success paths, which need a live LLM router.
 - **`cli/commands/doctor.py` (79%)** — the per-check failure branches,
   which need a deliberately broken Postgres or router to reach.
 
-Everything else is at or above 81%, and the search/storage core
-(`store/`, `search/`, `llm/`, `cli/formatter.py`, `cli/snippet.py`,
-`config.py`, `db/`) is at 92–100%.
+Everything else is at or above 83%, and the search/storage core
+(`store/`, `search/`, `llm/`, `log.py`, `cli/formatter.py`,
+`cli/snippet.py`, `config.py`, `db/`) is at 93–100%.
 
 ## Per-module
 
@@ -52,36 +53,38 @@ Everything else is at or above 81%, and the search/storage core
 | src/qmd\_py/cli/commands/\_\_init\_\_.py |        0 |        0 |    100% |
 | src/qmd\_py/cli/commands/bench.py        |       30 |       16 |     47% |
 | src/qmd\_py/cli/commands/doctor.py       |      108 |       23 |     79% |
-| src/qmd\_py/cli/commands/mcp.py          |       72 |       50 |     31% |
+| src/qmd\_py/cli/commands/mcp.py          |       86 |       55 |     36% |
 | src/qmd\_py/cli/commands/query.py        |      104 |       10 |     90% |
 | src/qmd\_py/cli/commands/read.py         |      218 |       20 |     91% |
 | src/qmd\_py/cli/commands/skill.py        |      104 |        8 |     92% |
-| src/qmd\_py/cli/commands/write.py        |      295 |       57 |     81% |
+| src/qmd\_py/cli/commands/write.py        |      312 |       52 |     83% |
 | src/qmd\_py/cli/formatter.py             |      243 |        0 |    100% |
-| src/qmd\_py/cli/main.py                  |       43 |        1 |     98% |
+| src/qmd\_py/cli/main.py                  |       53 |        3 |     94% |
 | src/qmd\_py/cli/runtime.py               |       11 |        0 |    100% |
 | src/qmd\_py/cli/snippet.py               |       68 |        0 |    100% |
-| src/qmd\_py/config.py                    |       23 |        0 |    100% |
+| src/qmd\_py/config.py                    |       28 |        0 |    100% |
 | src/qmd\_py/db/\_\_init\_\_.py           |        0 |        0 |    100% |
 | src/qmd\_py/db/engine.py                 |       18 |        0 |    100% |
 | src/qmd\_py/db/models.py                 |       66 |        0 |    100% |
+| src/qmd\_py/db/result.py                 |        6 |        0 |    100% |
 | src/qmd\_py/llm/\_\_init\_\_.py          |        0 |        0 |    100% |
 | src/qmd\_py/llm/client.py                |       55 |        0 |    100% |
+| src/qmd\_py/log.py                       |       57 |        0 |    100% |
 | src/qmd\_py/mcp/\_\_init\_\_.py          |        0 |        0 |    100% |
-| src/qmd\_py/mcp/server.py                |      257 |       41 |     84% |
+| src/qmd\_py/mcp/server.py                |      301 |       29 |     90% |
 | src/qmd\_py/search/\_\_init\_\_.py       |        0 |        0 |    100% |
 | src/qmd\_py/search/\_acl.py              |       16 |        0 |    100% |
 | src/qmd\_py/search/fts.py                |      167 |        2 |     99% |
-| src/qmd\_py/search/hybrid.py             |      252 |        2 |     99% |
-| src/qmd\_py/search/vector.py             |      140 |       11 |     92% |
+| src/qmd\_py/search/hybrid.py             |      268 |        2 |     99% |
+| src/qmd\_py/search/vector.py             |      147 |       11 |     93% |
 | src/qmd\_py/skills/\_\_init\_\_.py       |       67 |        6 |     91% |
 | src/qmd\_py/store/\_\_init\_\_.py        |        8 |        0 |    100% |
 | src/qmd\_py/store/\_common.py            |       50 |        0 |    100% |
-| src/qmd\_py/store/cleanup.py             |       21 |        1 |     95% |
-| src/qmd\_py/store/collection.py          |       63 |        0 |    100% |
-| src/qmd\_py/store/context.py             |       62 |        1 |     98% |
+| src/qmd\_py/store/cleanup.py             |       22 |        1 |     95% |
+| src/qmd\_py/store/collection.py          |       64 |        0 |    100% |
+| src/qmd\_py/store/context.py             |       63 |        1 |     98% |
 | src/qmd\_py/store/documents.py           |       36 |        0 |    100% |
-| src/qmd\_py/store/indexing.py            |       96 |        3 |     97% |
+| src/qmd\_py/store/indexing.py            |      115 |        3 |     97% |
 | src/qmd\_py/store/retrieval.py           |      186 |        2 |     99% |
 | src/qmd\_py/vpath.py                     |       12 |        0 |    100% |
-| **TOTAL**                                | **3133** |  **269** | **91%** |
+| **TOTAL**                                | **3331** |  **259** | **92%** |
