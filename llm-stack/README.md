@@ -2,11 +2,12 @@
 
 Entirely optional, for convenience - `marq` has no local-model-loading
 concept at all (see `llm/client.py`); it's just a plain HTTP client
-against whatever `MARQ_LLM_BASE_URL` points at. By default that's the real
-`ubuserver.internal` router. This lets you run an equivalent router
-locally instead (e.g. to work offline, or without depending on shared
-infrastructure) - there's no data-safety motivation like there is for the
-Postgres container, since the LLM router holds no state of ours.
+against whatever `MARQ_LLM_BASE_URL` points at, which defaults to
+`http://localhost:8099` - a placeholder rather than a router that exists,
+and exactly what this stack serves. So running this is one way to satisfy
+the default; pointing at a shared router elsewhere is the other. There's
+no data-safety motivation like there is for the Postgres container, since
+the LLM router holds no state of ours.
 
 ## Setup
 
@@ -20,7 +21,8 @@ Postgres container, since the LLM router holds no state of ours.
 
 ## GPU acceleration
 
-The `server-vulkan` image (same one `ubuserver.internal` runs) works with
+The `server-vulkan` image (same one the shared yourserver.com router
+runs) works with
 any Vulkan-capable GPU - NVIDIA, AMD, or Intel - unlike CUDA-only images.
 `compose.yaml` passes through `/dev/dri` for this. If your dev machine has
 no GPU at all, drop `--gpu-layers 99` from the `llm` service's command

@@ -1,7 +1,7 @@
 """Schema-per-test-run Postgres harness.
 
-Each test gets a fresh `qmd_test_<uuid>` schema on the real
-`ubuserver.internal` instance (reusing its already-installed `vector`/
+Each test gets a fresh `qmd_test_<uuid>` schema on whichever instance
+`MARQ_POSTGRES_URL` points at (reusing its already-installed `vector`/
 `pg_trgm` extensions rather than spinning up a throwaway containerized
 Postgres), with tables created from `SQLModel.metadata` directly - not via
 Alembic, since these tests care about behavior, not migration history.

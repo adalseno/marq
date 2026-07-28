@@ -21,9 +21,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # Idempotent - already installed database-wide on ubuserver.internal,
-    # but needed for a fresh dev/test database (e.g. the schema-per-test-run
-    # harness in Phase 2's test suite).
+    # Idempotent - already installed database-wide on the shared
+    # yourserver.com instance, but needed for a fresh dev/test database
+    # (e.g. the schema-per-test-run harness in Phase 2's test suite).
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
 

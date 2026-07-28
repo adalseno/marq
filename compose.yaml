@@ -1,4 +1,4 @@
-# Local dev/test Postgres - pinned to pg16 to match the ubuserver.internal
+# Local dev/test Postgres - pinned to pg16 to match the yourserver.com
 # production instance exactly (PostgreSQL 16.14). Day-to-day iteration and
 # the pytest suite point here; each phase's final live-parity check still
 # runs against the real server before the phase is considered done.
@@ -19,7 +19,7 @@ services:
       timeout: 3s
       retries: 20
 
-  # Optional local llama.cpp router, mirroring ubuserver.internal's own
+  # Optional local llama.cpp router, mirroring yourserver.com's own
   # Quadlet setup (~/.config/containers/systemd/llama-cpp.container) - pure
   # convenience, not started by default (`podman-compose --profile llm up`).
   # See llm-stack/README.md for GGUF file setup.
