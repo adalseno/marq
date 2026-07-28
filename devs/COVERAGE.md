@@ -8,6 +8,11 @@ at all** and run in about thirty seconds (`uv run pytest -m "not integration"`).
 The remaining 149 are integration tests hitting a real Postgres and a real
 LLM router; see [CLAUDE.md](../CLAUDE.md) for the testing conventions.
 
+Of those 149, only **11** genuinely need a reachable LLM router — they
+carry `@pytest.mark.llm`. The other 138 need Postgres alone, so
+`pytest -m "not llm"` runs **430 of 441 tests** against nothing more than
+a pgvector service container. That is the set CI runs.
+
 Seventeen of those are property-based (`tests/test_properties.py`,
 hypothesis). They barely move the line-coverage numbers below — every
 function they cover was already at or near 100% — because what they add is

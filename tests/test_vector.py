@@ -102,6 +102,7 @@ async def llm_client() -> AsyncIterator[LlmClient]:
     await client.aclose()
 
 
+@pytest.mark.llm
 @pytest.mark.integration
 async def test_embed_and_search_vec_finds_semantically_related_doc(
     session: AsyncSession, user: CurrentUser, llm_client: LlmClient
@@ -137,6 +138,7 @@ async def test_embed_and_search_vec_finds_semantically_related_doc(
     assert results[0].score > results[1].score
 
 
+@pytest.mark.llm
 @pytest.mark.integration
 async def test_search_vec_respects_collection_filter(
     session: AsyncSession, user: CurrentUser, llm_client: LlmClient
@@ -158,6 +160,7 @@ async def test_search_vec_respects_collection_filter(
     assert [r.collection_name for r in scoped] == ["veca"]
 
 
+@pytest.mark.llm
 @pytest.mark.integration
 async def test_embed_pending_documents_is_idempotent(
     session: AsyncSession, user: CurrentUser, llm_client: LlmClient
@@ -176,6 +179,7 @@ async def test_embed_pending_documents_is_idempotent(
     assert second.docs_processed == 0
 
 
+@pytest.mark.llm
 @pytest.mark.integration
 async def test_embed_pending_documents_commits_each_document(
     session: AsyncSession, user: CurrentUser, llm_client: LlmClient

@@ -47,6 +47,7 @@ async def test_fts_finds_the_typescript_types(
     assert results[0].display_path == "sample/src/models.ts"
 
 
+@pytest.mark.llm
 async def test_vector_search_finds_semantically_related_files(
     session: AsyncSession,
     user: CurrentUser,
@@ -64,6 +65,7 @@ async def test_vector_search_finds_semantically_related_files(
     assert results[0].display_path in {"sample/src/tasks.py", "sample/docs/architecture.md"}
 
 
+@pytest.mark.llm
 async def test_vector_search_across_the_http_layer(
     session: AsyncSession,
     user: CurrentUser,

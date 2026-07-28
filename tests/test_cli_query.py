@@ -33,6 +33,7 @@ def _indexed_collection(marq: Marq, tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
+@pytest.mark.llm
 def test_embed_then_vsearch_finds_semantically_related_document(
     marq: Marq, tmp_path: Path
 ) -> None:
@@ -58,6 +59,7 @@ def test_vsearch_without_embeddings_reports_no_results(marq: Marq, tmp_path: Pat
     assert "No results found." in result.output
 
 
+@pytest.mark.llm
 def test_query_finds_document_via_hybrid_pipeline(marq: Marq, tmp_path: Path) -> None:
     _indexed_collection(marq, tmp_path)
     marq("embed")

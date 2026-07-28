@@ -132,6 +132,7 @@ async def test_run_benchmark_bm25_only_against_sample_collection(
     assert exact.backends["bm25"].precision_at_k == 1.0
 
 
+@pytest.mark.llm
 @pytest.mark.integration
 async def test_run_benchmark_vector_and_full_backends_against_sample_collection(
     session: AsyncSession, user: CurrentUser, llm_client: LlmClient, sample_collection: Collection

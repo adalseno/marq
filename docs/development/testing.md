@@ -38,6 +38,22 @@ neither is reachable — most of the pure/logic-only modules (formatter,
 scoring, vpath, skill discovery) have non-integration unit tests that
 don't need either.
 
+**`@pytest.mark.llm`** narrows that further. Only **11** of the
+integration tests actually need a reachable router; the rest need
+Postgres alone, and many that *look* LLM-shaped mock the router with
+`httpx.MockTransport`. That distinction is what makes CI viable: a
+pgvector service container is trivial to provide, a GPU router is not, so
+CI runs `pytest -m "not llm"` and covers **430 of 441 tests**.
+
+Determine the marker empirically rather than by reading imports — point
+`MARQ_LLM_BASE_URL` at a dead port and run the integration set:
+
+```sh
+MARQ_LLM_BASE_URL=http://127.0.0.1:9 uv run pytest -m integration
+```
+
+Whatever fails with a connection error needs `@pytest.mark.llm`.
+
 **Property-based tests live in `tests/test_properties.py`** (hypothesis),
 and stay deliberately confined to it. They cover the pure, input-heavy
 helpers — `extract_snippet`, `chunk_document`, `vpath`, and the

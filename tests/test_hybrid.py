@@ -418,6 +418,7 @@ async def test_expand_query_falls_back_on_llm_error(llm_client: LlmClient) -> No
 # =============================================================================
 
 
+@pytest.mark.llm
 @pytest.mark.integration
 async def test_hybrid_query_finds_relevant_doc(
     session: AsyncSession, user: CurrentUser, llm_client: LlmClient, sample_collection: Collection
@@ -460,6 +461,7 @@ async def test_hybrid_query_no_rerank_uses_rrf_position_score(
     assert scores == sorted(scores, reverse=True)
 
 
+@pytest.mark.llm
 @pytest.mark.integration
 async def test_hybrid_query_embeds_every_vec_variant_in_one_request(
     session: AsyncSession, user: CurrentUser, llm_client: LlmClient, sample_collection: Collection

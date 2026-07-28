@@ -120,6 +120,13 @@ labels a mount `:Z`), which is why the note lives in its README.
 - Integration tests (`@pytest.mark.integration`) hit real Postgres and
   the real LLM router; run `pytest -m "not integration"` to skip them
   when neither is reachable.
+- **`@pytest.mark.llm`** is a subset of `integration` marking the **11**
+  tests that need a reachable router, not just Postgres. Everything else
+  runs against a pgvector service container alone, so CI uses
+  `pytest -m "not llm"` — **430 of 441 tests**. Add the marker to any new
+  test that really embeds/reranks; the check is empirical, not by
+  inspection: point `MARQ_LLM_BASE_URL` at a dead port and see what
+  fails (mocked-router tests use `httpx.MockTransport` and pass fine).
 - `tests/fixtures/sample-collection/` is a small, frozen, checked-in
   multi-language project (`.md`/`.py`/`.js`/`.ts`) — a manageable
   stand-in for a real external collection, usable without SSH access or
