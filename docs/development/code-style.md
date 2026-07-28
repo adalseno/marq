@@ -11,6 +11,42 @@ the live-verification discipline in [Setup & testing](testing.md) —
 `ruff`/`mypy` catch what they catch, but neither proves a feature
 actually works against real infrastructure.
 
+## Typing, and the `type: ignore`s that stay
+
+`mypy` runs in `strict` mode with the `pydantic.mypy` plugin enabled (see
+`[tool.mypy]` in `pyproject.toml`), and the tree is clean. A handful of
+`# type: ignore` comments survive that, deliberately — if you are tempted
+to clear the last ones out, read this first.
+
+They fall into two groups, and both are about **someone else's types**,
+not ours:
+
+- **Untyped third-party decorators.** The MCP SDK's `FastMCP` exposes
+  some decorators without annotations, so `strict` mode flags any
+  function they wrap. Silencing it needs either upstream changes or a
+  local stub package for the SDK — a lot of surface area to maintain for
+  no checking we'd actually gain.
+- **Test scaffolding that takes `**overrides`.** The formatter tests
+  build fixture objects from a defaults dict splatted into a dataclass.
+  Spelling out typed keyword parameters for every field of every builder
+  trades a one-line ignore for a few dozen lines of boilerplate in code
+  that exists to make *other* tests readable. (`dataclasses.replace`
+  looks like a way out; it isn't — `mypy` checks that too.)
+
+The rule when you hit a new one: **prefer a narrowing `cast` over an
+ignore whenever the type is knowable.** An `ignore[attr-defined]` doesn't
+just silence the error, it makes the whole expression `Any` and stops
+checking everything downstream of it. `db/result.py`'s `affected_rows()`
+is the worked example — `AsyncSession.execute()` is typed as returning
+`Result[Any]`, which has no `rowcount`, but DML really returns a
+`CursorResult`, which does. One documented `cast` in one place restores
+`int` typing at every call site that needs a row count.
+
+If an ignore genuinely has to stay, keep it **error-code-specific**
+(`# type: ignore[arg-type]`, never a bare `# type: ignore`) so it can't
+quietly absorb an unrelated error later, and say why in a comment or
+docstring.
+
 ## Docstring convention
 
 **Google style** (`docstring_style = "google"` in `zensical.toml`), with
