@@ -24,7 +24,7 @@ from collections.abc import Callable, Iterator
 
 import psycopg
 import pytest
-from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import HealthCheck, assume, example, given, settings
 from hypothesis import strategies as st
 
 from qmd_py.cli.snippet import extract_snippet
@@ -60,6 +60,18 @@ chunkable_bodies = st.one_of(bodies, long_bodies)
 # =============================================================================
 
 
+# The truncation branch switches form at max_len == 4 - the first budget
+# the three-character ellipsis fits inside. Instrumenting the generated
+# inputs showed hypothesis tries 0, 3 and 5 but never 4, and because the
+# profile is derandomized that gap is stable: it would stay uncovered on
+# every future run rather than being filled by chance. So the boundary is
+# pinned explicitly instead of being left to the strategy.
+_TRUNCATION_BOUNDARY = {"body": "alpha\nbeta gamma delta\nzeta", "query": "beta", "chunk_pos": None}
+
+
+@example(**_TRUNCATION_BOUNDARY, max_len=3)
+@example(**_TRUNCATION_BOUNDARY, max_len=4)
+@example(**_TRUNCATION_BOUNDARY, max_len=5)
 @given(
     body=bodies,
     query=queries,
@@ -83,6 +95,31 @@ def test_extract_snippet_body_never_exceeds_max_len(
     result = extract_snippet(body, query, max_len, chunk_pos, None, None)
     body_text = result.snippet.split("\n", 1)[1] if "\n" in result.snippet else ""
     assert len(body_text) <= max_len
+
+
+@pytest.mark.parametrize("max_len", [0, 1, 2, 3, 4, 5, 6, 20])
+def test_extract_snippet_truncation_is_tight_and_switches_form_at_four(max_len: int) -> None:
+    """Truncation spends the whole budget, and uses the ellipsis exactly
+    when it fits.
+
+    The property above only pins the upper bound (`<= max_len`), which a
+    function returning the empty string would also satisfy. This pins the
+    two things that make the bound *useful*: when truncation happens the
+    result is exactly `max_len` long, and the `...` marker appears for
+    every budget that can hold it (>= 4) and for none that can't.
+
+    Parametrized rather than generated on purpose - these are the specific
+    values either side of the branch, and they should be checked on every
+    run regardless of what the strategy happens to explore.
+    """
+    body = "alpha\nbeta gamma delta\nzeta"
+    result = extract_snippet(body, "beta", max_len, None, None, None)
+    body_text = result.snippet.split("\n", 1)[1] if "\n" in result.snippet else ""
+
+    # The chosen body is far longer than any max_len here, so truncation
+    # always fires and the bound is always reached.
+    assert len(body_text) == max_len
+    assert body_text.endswith("...") == (max_len >= 4)
 
 
 @given(

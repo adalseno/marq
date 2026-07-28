@@ -53,7 +53,15 @@ FIXTURE_COLLECTION_EXTS = {".md", ".py", ".js", ".ts"}
 # the strategy changes, not spontaneously over time - which is the trade
 # this project wants. `.hypothesis/` is therefore build output, not state
 # worth committing.
-settings.register_profile("qmd", derandomize=True, max_examples=200)
+#
+# max_examples is hypothesis's own default of 100, chosen by measurement
+# rather than taste: the property tests cost ~14s at 100 and ~26s at 200,
+# against a ~17s baseline for the rest of the no-infrastructure suite, and
+# doubling the inner loop is not worth the extra exploration. Volume is
+# also the wrong tool for the boundaries that actually matter - those are
+# pinned with `@example` and parametrized cases in test_properties.py,
+# which no amount of generated input guarantees to hit.
+settings.register_profile("qmd", derandomize=True, max_examples=100)
 settings.load_profile("qmd")
 
 
