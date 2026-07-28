@@ -252,3 +252,14 @@ real MCP `ClientSession` over the SDK's in-memory transport). See
 `tests/test_cli.py` and `tests/test_mcp_server.py`.
 
 Coverage is summarised in [`devs/COVERAGE.md`](devs/COVERAGE.md).
+
+## License
+
+[MIT](LICENSE).
+
+The same license [qmd](https://github.com/tobi/qmd) uses, chosen to match
+it — though not required to. marq is a from-scratch rewrite that shares
+qmd's ideas (the hybrid pipeline, the query syntax, the MCP surface) and
+none of its code, so it isn't a derivative work. Matching is a courtesy to
+the project that inspired it, and keeps the two trivially compatible for
+anyone who wants to use both.
