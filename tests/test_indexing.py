@@ -134,6 +134,36 @@ async def test_reindex_collection_skips_unreadable_and_empty_files(
     assert await get_active_document_paths(session, collection.id) == ["good.md"]
 
 
+async def test_reindex_collection_skips_and_counts_oversized_files(
+    tmp_path: Path, session: AsyncSession, user: CurrentUser
+) -> None:
+    """Regression for the third review's finding 1: a distinct-token-heavy
+    file over ~1 MB used to reach `to_tsvector` and abort the whole run
+    with a raw Postgres "string is too long for tsvector" error. It must
+    be soft-skipped and counted instead, and a previously indexed file
+    that grows past the cap is deactivated like any other skipped file."""
+    (tmp_path / "good.md").write_text("# Good\n\nreal body")
+    grower = tmp_path / "grower.md"
+    grower.write_text("# Grower\n\nstill small")
+    collection = await add_collection(session, user, "big", str(tmp_path), "**/*.md")
+    await session.commit()
+
+    first = await reindex_collection(session, user, "big")
+    await session.commit()
+    assert first.indexed == 2
+    assert first.skipped_oversize == 0
+
+    oversized = "# Huge\n\n" + "tok ".join(str(n) for n in range(300_000))
+    assert len(oversized) > 1_000_000
+    grower.write_text(oversized)
+    second = await reindex_collection(session, user, "big")
+    await session.commit()
+
+    assert second.skipped_oversize == 1
+    assert second.removed == 1
+    assert await get_active_document_paths(session, collection.id) == ["good.md"]
+
+
 async def test_reindex_collection_shares_content_between_duplicate_files(
     tmp_path: Path, session: AsyncSession, user: CurrentUser
 ) -> None:

@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 import click
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmd_py.auth import CurrentUser
@@ -92,6 +92,11 @@ async def _collection_add_impl(
         f"  Indexed: {result.indexed} new, {result.updated} updated, "
         f"{result.unchanged} unchanged, {result.removed} removed"
     )
+    if result.skipped_oversize:
+        click.echo(
+            f"  Skipped {result.skipped_oversize} oversized file(s) "
+            "(over ~1 MB - too large to index)"
+        )
 
 
 @collection_group.command("remove")
@@ -287,9 +292,11 @@ async def _update_impl(session: AsyncSession, user: CurrentUser) -> None:
         try:
             result = await reindex_collection(session, user, row.name)
             await session.commit()
-        except OSError as exc:
-            # Realistically a vanished/unreadable source directory - one
-            # unreachable collection shouldn't strand the others either.
+        except (OSError, SQLAlchemyError) as exc:
+            # OSError: realistically a vanished/unreadable source
+            # directory. SQLAlchemyError: a per-file database surprise
+            # (the oversized-tsvector class of failure) - either way, one
+            # broken collection shouldn't strand the others.
             await session.rollback()
             click.echo(f"✗ Reindex failed: {exc}", err=True)
             failures.append((row.name, f"reindex failed: {exc}"))
@@ -300,6 +307,11 @@ async def _update_impl(session: AsyncSession, user: CurrentUser) -> None:
             f"Indexed: {result.indexed} new, {result.updated} updated, "
             f"{result.unchanged} unchanged, {result.removed} removed"
         )
+        if result.skipped_oversize:
+            click.echo(
+                f"Skipped {result.skipped_oversize} oversized file(s) "
+                "(over ~1 MB - too large to index)"
+            )
         if result.orphaned_cleaned:
             click.echo(f"Cleaned up {result.orphaned_cleaned} orphaned content hash(es)")
         click.echo()

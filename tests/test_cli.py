@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 from click.testing import Result
+from sqlalchemy.exc import SQLAlchemyError
 
 pytestmark = pytest.mark.integration
 
@@ -318,6 +319,55 @@ def test_update_continues_past_a_failing_update_command(marq: Marq, tmp_path: Pa
     assert "a-broken" in result.output
     # The collection after the failing one was still reindexed.
     assert "unique-newer-token" in marq("search", "unique-newer-token").output
+
+
+def test_update_continues_past_a_database_error_in_one_collection(
+    marq: Marq, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for the third review's finding 1's blast radius: a
+    `SQLAlchemyError` escaping one collection's reindex (the
+    oversized-tsvector class of per-file surprise) used to abort the whole
+    run and strand every later collection - the exact failure shape the
+    per-collection `except OSError` was added to prevent, reintroduced
+    through a different exception type."""
+    import qmd_py.cli.commands.write as write_module
+    from qmd_py.store import reindex_collection as real_reindex
+
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    _write_collection(broken)
+    healthy = tmp_path / "healthy"
+    healthy.mkdir()
+    (healthy / "notes").mkdir()
+
+    marq("collection", "add", str(broken), "--name", "a-broken", "--mask", "**/*.md")
+    marq("collection", "add", str(healthy), "--name", "b-healthy", "--mask", "**/*.md")
+
+    async def failing_reindex(session: object, user: object, name: str) -> object:
+        if name == "a-broken":
+            raise SQLAlchemyError("string is too long for tsvector")
+        return await real_reindex(session, user, name)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(write_module, "reindex_collection", failing_reindex)
+
+    (healthy / "notes" / "fresh.md").write_text("# Fresh\n\nunique-fresh-token\n")
+    result = marq("update")
+
+    assert result.exit_code == 1, result.output
+    assert "a-broken" in result.output
+    # The collection after the failing one was still reindexed.
+    assert "unique-fresh-token" in marq("search", "unique-fresh-token").output
+
+
+def test_collection_add_reports_oversized_skips(marq: Marq, tmp_path: Path) -> None:
+    (tmp_path / "small.md").write_text("# Small\n\nfine\n")
+    (tmp_path / "huge.md").write_text("# Huge\n\n" + "tok ".join(str(n) for n in range(300_000)))
+
+    result = marq("collection", "add", str(tmp_path), "--name", "big", "--mask", "**/*.md")
+
+    assert result.exit_code == 0, result.output
+    assert "Indexed: 1 new" in result.output
+    assert "Skipped 1 oversized file(s)" in result.output
 
 
 def test_cleanup_runs_and_reports(marq: Marq, tmp_path: Path) -> None:

@@ -29,6 +29,15 @@ from qmd_py.store.documents import (
 
 _EXCLUDE_DIRS = frozenset({"node_modules", ".git", ".cache", "vendor", "dist", "build"})
 
+MAX_INDEXABLE_CHARS = 1_000_000
+"""Documents longer than this are skipped at index time (soft-skip, counted
+in `ReindexResult.skipped_oversize`), the same convention `multi_get`'s
+`max_bytes` uses. The line sits where Postgres draws it: a tsvector caps at
+1 MiB, and a distinct-token-heavy file (log dump, minified code) crosses
+that well under 2 MB of source text - feeding it through would abort the
+whole reindex with a raw `ProgrammingError`. Even a document that squeaked
+under the tsvector cap would only degrade search quality anyway."""
+
 
 # Matches the leftmost *innermost* alternation group (the character class
 # excludes braces, so an outer `{a,{b,c}}` can't match until its inner group
@@ -123,6 +132,10 @@ class ReindexResult:
             disk. Deactivated, not deleted - `marq cleanup` reclaims them.
         orphaned_cleaned: Content rows dropped because no document, active
             or inactive, still referenced them.
+        skipped_oversize: Files skipped for exceeding `MAX_INDEXABLE_CHARS`
+            - the one skip reason that gets its own visible count, because
+            silently dropping a legitimate (if huge) file from the index
+            would otherwise look like a search bug.
     """
 
     indexed: int
@@ -130,6 +143,7 @@ class ReindexResult:
     unchanged: int
     removed: int
     orphaned_cleaned: int
+    skipped_oversize: int = 0
 
 
 async def reindex_collection(
@@ -151,7 +165,10 @@ async def reindex_collection(
 
     Files are skipped silently, not reported, in three cases: unreadable
     or non-UTF-8 bytes, whitespace-only content, and anything excluded by
-    the collection's pattern or ignore rules.
+    the collection's pattern or ignore rules. A fourth case is skipped but
+    *counted*: files over `MAX_INDEXABLE_CHARS` (see `skipped_oversize`).
+    A previously indexed file that has since crossed the cap is treated
+    like any other skipped file - its document is deactivated.
 
     Args:
         name: Collection name, resolved against `user`'s own collections.
@@ -175,6 +192,7 @@ async def reindex_collection(
     indexed = 0
     updated = 0
     unchanged = 0
+    skipped_oversize = 0
     seen_paths: set[str] = set()
 
     for rel_path in files:
@@ -184,6 +202,9 @@ async def reindex_collection(
         except (OSError, UnicodeDecodeError):
             continue
         if not content.strip():
+            continue
+        if len(content) > MAX_INDEXABLE_CHARS:
+            skipped_oversize += 1
             continue
         seen_paths.add(rel_path)
 
@@ -221,4 +242,5 @@ async def reindex_collection(
         unchanged=unchanged,
         removed=removed,
         orphaned_cleaned=orphaned,
+        skipped_oversize=skipped_oversize,
     )
