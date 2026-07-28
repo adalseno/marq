@@ -19,6 +19,7 @@ from qmd_py.auth import CurrentUser
 from qmd_py.cli.snippet import extract_intent_terms
 from qmd_py.config import Settings
 from qmd_py.llm.client import LlmClient, format_query_for_embedding
+from qmd_py.log import log_duration
 from qmd_py.search.fts import search_fts, validate_lex_query, validate_semantic_query
 from qmd_py.search.vector import chunk_document, has_embeddings_table, search_vec
 
@@ -430,6 +431,26 @@ async def hybrid_query(
     """BM25 + vector + query expansion + RRF + chunked reranking - port of
     the TS reference's `hybridQuery`. See `QueryOptions` for the tunables.
     """
+    with log_duration(logger, "query") as timing:
+        results = await _hybrid_query_impl(
+            session, user, query, llm_client, models, options, timing
+        )
+        # Counts and durations only - never the query text or any document
+        # content (see log.py's privacy note); the query itself is DEBUG.
+        timing["results"] = len(results)
+        logger.debug("query text: %r (intent: %r)", query, (options or QueryOptions()).intent)
+    return results
+
+
+async def _hybrid_query_impl(
+    session: AsyncSession,
+    user: CurrentUser,
+    query: str,
+    llm_client: LlmClient,
+    models: ModelConfig,
+    options: QueryOptions | None,
+    timing: dict[str, object],
+) -> list[HybridQueryResult]:
     opts = options or QueryOptions()
     # Unpacked once rather than referenced as `opts.x` throughout: keeps
     # the pipeline below reading as it did before the options object.
@@ -516,6 +537,15 @@ async def hybrid_query(
     weights = _hybrid_rrf_weights(query_types)
     fused = reciprocal_rank_fusion(ranked_lists, weights)
     candidates = fused[:candidate_limit]
+    timing["subqueries"] = len(ranked_lists)
+    timing["candidates"] = len(candidates)
+    logger.debug(
+        "fused %d ranked list(s) %s with weights %s into %d candidate(s)",
+        len(ranked_lists),
+        query_types,
+        weights,
+        len(fused),
+    )
     if not candidates:
         return []
 
@@ -571,6 +601,7 @@ async def hybrid_query(
         return results[:limit]
 
     if skip_rerank:
+        timing["reranked"] = "no"
         return _rrf_only_results()
 
     chunks_to_rerank = [
@@ -580,6 +611,7 @@ async def hybrid_query(
         return []
 
     rerank_query = f"{intent}\n\n{query}" if intent else query
+    timing["reranked"] = "yes"
     try:
         # Both calls hit the router: /tokenize (for the per-pair token
         # budget) and /rerank. Either failing used to abort the whole

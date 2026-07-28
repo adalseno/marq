@@ -9,7 +9,9 @@ CTE, since `ORDER BY distance LIMIT n` is the only access pattern that
 uses the ANN index.
 """
 
+import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +25,8 @@ from qmd_py.db.result import affected_rows
 from qmd_py.llm.client import LlmClient, format_doc_for_embedding, format_query_for_embedding
 from qmd_py.search._acl import collection_names_by_id, resolve_collection_ids
 from qmd_py.search.fts import SearchResult, get_context_for_path, get_docid
+
+logger = logging.getLogger(__name__)
 
 # Chunking: 900 tokens/chunk, 15% overlap - fixed character-window
 # slicing with a conservative chars-per-token estimate. This is a
@@ -264,8 +268,12 @@ async def embed_pending_documents(
         """
     )
 
+    logger.info(
+        "embed run starting: %d pending document(s), model %s", len(pending), model_slug
+    )
     docs_processed = 0
     chunks_embedded = 0
+    started = time.perf_counter()
     for row in pending:
         chunks = chunk_document(row.body)
         texts_to_embed = [
@@ -292,6 +300,13 @@ async def embed_pending_documents(
         chunks_embedded += len(chunks)
         docs_processed += 1
 
+    logger.info(
+        "embed run done: docs=%d chunks=%d model=%s %.0fms",
+        docs_processed,
+        chunks_embedded,
+        model_slug,
+        (time.perf_counter() - started) * 1000,
+    )
     return EmbedResult(docs_processed, chunks_embedded)
 
 

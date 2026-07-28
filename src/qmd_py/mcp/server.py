@@ -26,12 +26,13 @@ TS reference's actual JSON schema, not internal Python code.
 
 from __future__ import annotations
 
+import functools
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from importlib.metadata import version
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, ParamSpec, TypeVar
 from urllib.parse import quote, unquote
 
 from mcp.server.fastmcp import FastMCP
@@ -53,7 +54,7 @@ from qmd_py.cli.snippet import extract_snippet
 from qmd_py.config import get_settings
 from qmd_py.db.engine import get_session
 from qmd_py.llm.client import LlmClient
-from qmd_py.log import setup_logging
+from qmd_py.log import log_duration, request_context, setup_logging
 from qmd_py.search.hybrid import (
     ExpandedQuery,
     ModelConfig,
@@ -75,6 +76,33 @@ from qmd_py.store import (
 )
 
 logger = logging.getLogger(__name__)
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+_AsyncFunc = Callable[P, Awaitable[R]]
+
+
+def _with_request_id(prefix: str) -> Callable[[_AsyncFunc[P, R]], _AsyncFunc[P, R]]:
+    """Tag every log line from one tool call with a short correlation id.
+
+    Tool calls are concurrent, so their lines interleave in the daemon
+    log; the id is what makes a single call's trace followable.
+    Applied *under* `@mcp.tool()` and with `functools.wraps`, so the
+    signature FastMCP introspects to build the JSON schema is still the
+    real one (`inspect.signature` follows `__wrapped__`).
+    """
+
+    def decorate(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        @functools.wraps(func)
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            with request_context(prefix):
+                return await func(*args, **kwargs)
+
+        return wrapper
+
+    return decorate
 
 
 def _encode_qmd_path(path: str) -> str:
@@ -349,6 +377,7 @@ def _register_query_tool(mcp: FastMCP, llm_client: LlmClient) -> None:
         description=_QUERY_TOOL_DESCRIPTION,
         annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
     )
+    @_with_request_id("query")
     async def query(
         query: Annotated[
             str | None,
@@ -495,6 +524,7 @@ def _register_get_tool(mcp: FastMCP) -> None:
         "found.",
         annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
     )
+    @_with_request_id("get")
     async def get(
         file: Annotated[
             str,
@@ -575,6 +605,7 @@ def _register_multi_get_tool(mcp: FastMCP) -> None:
         "'journals/2025-05*.md') or comma-separated list. Skips files larger than maxBytes.",
         annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
     )
+    @_with_request_id("mget")
     async def multi_get_tool(
         pattern: Annotated[
             str, Field(description="Glob pattern or comma-separated list of file paths")
@@ -650,6 +681,7 @@ def _register_status_tool(mcp: FastMCP, embed_model: str) -> None:
         "health information.",
         annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
     )
+    @_with_request_id("status")
     async def status() -> CallToolResult:
         async with get_session() as session:
             user = await get_current_user(session)
@@ -743,9 +775,18 @@ def _register_rest_routes(mcp: FastMCP, start_time: float, llm_client: LlmClient
 
     @mcp.custom_route("/health", methods=["GET"])  # type: ignore[untyped-decorator]
     async def health(request: Request) -> JSONResponse:
+        # Deliberately unlogged: a liveness probe hitting this every few
+        # seconds would be the loudest thing in the log and say nothing.
         return JSONResponse({"status": "ok", "uptime": int(time.time() - start_time)})
 
+    @_with_request_id("rest")
     async def query_rest(request: Request) -> JSONResponse:
+        with log_duration(logger, f"{request.method} {request.url.path}") as timing:
+            response = await _query_rest_impl(request)
+            timing["status"] = response.status_code
+        return response
+
+    async def _query_rest_impl(request: Request) -> JSONResponse:
         try:
             params = await request.json()
         except ValueError:
@@ -845,6 +886,12 @@ async def create_mcp_server(
     # writes to stderr or a file, and is idempotent, so this is safe
     # whether or not the CLI entry point already configured it.
     setup_logging(settings.log_level, settings.log_file)
+    # FastMCP calls logging.basicConfig() with a RichHandler on the *root*
+    # logger, so records propagating up from `qmd_py` would be emitted a
+    # second time, in a different format, to a different destination
+    # (under --daemon: once to the log file, once to the captured stdio
+    # file). Our handler is the only one that should serve them.
+    logging.getLogger("qmd_py").propagate = False
 
     async with get_session() as session:
         user = await get_current_user(session)
@@ -886,4 +933,13 @@ async def create_mcp_server(
     _register_document_resource(mcp)
     if http:
         _register_rest_routes(mcp, time.time(), llm_client)
+    logger.info(
+        "mcp server ready: transport=%s%s schema=%s models=embed:%s/generate:%s/rerank:%s",
+        "http" if http else "stdio",
+        f" bind={host}:{port}" if http else "",
+        settings.postgres_schema,
+        settings.embed_model,
+        settings.generate_model,
+        settings.rerank_model,
+    )
     return mcp

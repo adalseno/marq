@@ -11,9 +11,21 @@ from pathlib import Path
 
 import click
 
+from qmd_py.config import get_settings
+
 _STATE_DIR = Path.home() / ".cache" / "marq"
 _PID_FILE = _STATE_DIR / "mcp.pid"
-_LOG_FILE = _STATE_DIR / "mcp.log"
+_LOG_FILE = _STATE_DIR / "marq.log"
+"""Where the daemon's own logging goes, via log.py's RotatingFileHandler
+(size-capped, 3 backups). It replaces the raw, unbounded `mcp.log` the
+daemon used to append stdout/stderr to forever - a disk problem for a
+server meant to run indefinitely."""
+
+_STDIO_FILE = _STATE_DIR / "mcp-stdio.log"
+"""Anything the child writes outside the logging system (a traceback on
+startup, a library printing to stderr) still has to land somewhere, so
+Popen's stdout/stderr go here. Truncated at each daemon start rather
+than appended, which is what made the old file grow without bound."""
 
 
 def _process_alive(pid: int) -> bool:
@@ -58,20 +70,36 @@ def _start_daemon(host: str, port: int) -> None:
             raise SystemExit(1)
         _PID_FILE.unlink()
 
-    with _LOG_FILE.open("ab") as log:
+    settings = get_settings()
+    # The daemon logs to a rotating file rather than the caller's stderr,
+    # which is gone the moment this command returns. An explicit
+    # MARQ_LOG_FILE still wins; MARQ_LOG_LEVEL defaults to INFO here
+    # (one line per unit of work) rather than the CLI's WARNING, since
+    # nobody is watching a background process interactively.
+    # model_fields_set holds the settings actually provided via env/.env,
+    # which is how an explicit MARQ_LOG_LEVEL=WARNING is told apart from
+    # the default that the daemon overrides.
+    daemon_level = settings.log_level if "log_level" in settings.model_fields_set else "INFO"
+    env = {
+        **os.environ,
+        "MARQ_LOG_FILE": str(settings.log_file or _LOG_FILE),
+        "MARQ_LOG_LEVEL": daemon_level,
+    }
+    with _STDIO_FILE.open("wb") as stdio_log:
         proc = subprocess.Popen(
             [
                 sys.executable, "-m", "qmd_py.cli.main", "mcp",
                 "--http", "--host", host, "--port", str(port),
             ],
-            stdout=log,
-            stderr=log,
+            stdout=stdio_log,
+            stderr=stdio_log,
             stdin=subprocess.DEVNULL,
             start_new_session=True,
+            env=env,
         )
     _PID_FILE.write_text(str(proc.pid))
     click.echo(f"MCP daemon started (pid {proc.pid}), listening on http://{host}:{port}/mcp")
-    click.echo(f"Logs: {_LOG_FILE}")
+    click.echo(f"Logs: {env['MARQ_LOG_FILE']} (level {daemon_level})")
 
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "::1"})

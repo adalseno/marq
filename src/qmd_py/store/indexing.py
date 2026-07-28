@@ -17,6 +17,7 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from qmd_py.auth import CurrentUser
+from qmd_py.log import log_duration
 from qmd_py.store._common import _resolve_owned_collection, extract_title, hash_content
 from qmd_py.store.cleanup import cleanup_orphaned_content
 from qmd_py.store.documents import (
@@ -189,6 +190,25 @@ async def reindex_collection(
         unchanged file writes nothing) but not in I/O, so the cost scales
         with total collection size, not with how much changed.
     """
+    with log_duration(logger, f"reindex {name}") as timing:
+        result = await _reindex_collection_impl(session, user, name)
+        # Inside the block: log_duration emits the line on exit, so
+        # fields added afterwards would never reach it.
+        timing.update(
+            {
+                "indexed": result.indexed,
+                "updated": result.updated,
+                "unchanged": result.unchanged,
+                "removed": result.removed,
+                "skipped_oversize": result.skipped_oversize,
+            }
+        )
+    return result
+
+
+async def _reindex_collection_impl(
+    session: AsyncSession, user: CurrentUser, name: str
+) -> ReindexResult:
     collection = await _resolve_owned_collection(session, user, name, "write")
     files = _discover_files(collection.path, collection.pattern, collection.ignore_patterns)
     root = Path(collection.path)

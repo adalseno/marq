@@ -11,7 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from qmd_py.log import LOG_FILE_BACKUP_COUNT, setup_logging
+from qmd_py.log import (
+    LOG_FILE_BACKUP_COUNT,
+    log_duration,
+    request_context,
+    setup_logging,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +89,49 @@ def test_setup_logging_falls_back_to_warning_for_an_unknown_level() -> None:
     """Logging setup must never be the thing that breaks a command."""
     setup_logging("LOUD")
     assert logging.getLogger("qmd_py").level == logging.WARNING
+
+
+def test_log_duration_reports_elapsed_time_and_caller_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    setup_logging("INFO")
+    with caplog.at_level(logging.INFO, logger="qmd_py.test"):
+        with log_duration(logging.getLogger("qmd_py.test"), "query") as fields:
+            fields["results"] = 9
+            fields["candidates"] = 40
+
+    assert "query: results=9 candidates=40" in caplog.text
+    assert "ms" in caplog.text
+
+
+def test_log_duration_still_logs_when_the_block_raises(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The timing of a call that blew up is the interesting one."""
+    setup_logging("INFO")
+    with caplog.at_level(logging.INFO, logger="qmd_py.test"), pytest.raises(RuntimeError):
+        with log_duration(logging.getLogger("qmd_py.test"), "query"):
+            raise RuntimeError("boom")
+
+    assert "query:" in caplog.text
+
+
+def test_request_context_tags_lines_and_restores_the_previous_id(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Concurrent MCP tool calls interleave their lines; the id is what
+    makes one call's trace followable."""
+    setup_logging("WARNING")
+    logger = logging.getLogger("qmd_py.test")
+
+    with request_context("query") as request_id:
+        logger.warning("inside")
+    logger.warning("outside")
+
+    err = capsys.readouterr().err
+    assert f"[{request_id}] inside" in err
+    assert "[-] outside" in err
+    assert request_id.startswith("query-")
 
 
 def test_setup_logging_quiets_noisy_third_party_loggers() -> None:
