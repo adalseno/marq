@@ -16,7 +16,17 @@ from qmd_py.cli.main import cli, main
 from qmd_py.config import Settings
 
 
-def _missing_postgres_url_error() -> ValidationError:
+def _missing_postgres_url_error(monkeypatch: pytest.MonkeyPatch) -> ValidationError:
+    """Provoke the ValidationError main() is supposed to prettify.
+
+    `_env_file=None` suppresses the `.env` file but *not* the process
+    environment, so a real `MARQ_POSTGRES_URL` still satisfies the field
+    and no error is raised. That made this helper pass locally (where the
+    setting comes from `.env`) and fail under CI, which exports it as a
+    genuine environment variable. Clear it explicitly instead of relying
+    on the ambient environment.
+    """
+    monkeypatch.delenv("MARQ_POSTGRES_URL", raising=False)
     try:
         Settings(_env_file=None)
     except ValidationError as exc:
@@ -27,7 +37,7 @@ def _missing_postgres_url_error() -> ValidationError:
 def test_main_reports_missing_config_and_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    error = _missing_postgres_url_error()
+    error = _missing_postgres_url_error(monkeypatch)
 
     def fake_cli() -> None:
         raise error
