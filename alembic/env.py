@@ -2,7 +2,7 @@ import asyncio
 from logging.config import fileConfig
 from typing import Literal
 
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
@@ -106,6 +106,18 @@ async def run_async_migrations() -> None:
     connectable = create_async_engine(DB_URL, poolclass=pool.NullPool)
 
     async with connectable.connect() as connection:
+        # Every table (and alembic_version itself) is created inside
+        # MARQ_POSTGRES_SCHEMA, which nothing else creates: the connection
+        # URL only sets it as the search_path, and Postgres will not create
+        # a schema just because it is named there. On a blank database the
+        # first `alembic upgrade head` therefore failed with "no schema has
+        # been selected to create in" - which is exactly what the README
+        # and quickstart tell a new user to run against a fresh container.
+        # Idempotent, so it is a no-op on every subsequent run.
+        await connection.execute(
+            text(f'CREATE SCHEMA IF NOT EXISTS "{get_settings().postgres_schema}"')
+        )
+        await connection.commit()
         await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()

@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Only `deploy` needs more than read; keep the default minimal and widen
+# per-job.
+permissions:
+  contents: read
+
+# A newer push supersedes an in-flight run on the same ref. Never cancel
+# on main, so a deploy that is already running finishes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: lint, types, tests
+    runs-on: ubuntu-latest
+
+    services:
+      # Same image compose.yaml pins, so CI, local dev and production all
+      # agree on the Postgres version. conftest.py installs the `vector`
+      # and `pg_trgm` extensions itself per test schema, so nothing else
+      # needs provisioning here.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: qmd
+          POSTGRES_PASSWORD: qmd
+          POSTGRES_DB: qmd
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qmd -d qmd"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      MARQ_POSTGRES_URL: postgresql+psycopg://qmd:qmd@localhost:5432/qmd
+      MARQ_POSTGRES_SCHEMA: qmd_py
+      # Deliberately unroutable. No test selected below should reach the
+      # router; if one ever does, it fails fast with a connection error
+      # instead of silently depending on a machine CI does not have.
+      MARQ_LLM_BASE_URL: http://127.0.0.1:9
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type-check
+        run: uv run mypy src alembic tests
+
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+
+      - name: Verify models match the latest migration
+        run: uv run alembic check
+
+      # `not llm` is everything except the 11 tests needing a live LLM
+      # router: 430 of 441. See docs/development/testing.md.
+      - name: Tests
+        run: uv run pytest -m "not llm" -q
+
+  docs:
+    name: build docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --all-extras
+      - name: Build site (strict)
+        run: uv run zensical build --strict
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: deploy docs to Pages
+    # Gated on the suite: a red build must never publish documentation
+    # describing behaviour that does not hold.
+    needs: [test, docs]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
