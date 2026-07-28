@@ -362,7 +362,7 @@ async def multi_get(
         return []
 
     refs = await _active_document_refs(session, collection_ids)
-    is_comma_separated = "," in pattern and not any(c in pattern for c in "*?{")
+    is_comma_separated = "," in pattern and not any(c in pattern for c in "*?{[")
 
     matched: list[tuple[Document, str]] = []
     if is_comma_separated:
@@ -453,8 +453,8 @@ async def list_files(
 
     Args:
         path_prefix: Restrict to paths starting with this string. Matched
-            as a `LIKE` prefix, not as a glob, so it is a literal path
-            fragment and `*` has no special meaning.
+            as a literal prefix (LIKE wildcards `%`/`_` are escaped), not
+            as a glob, so `*` has no special meaning either.
 
     Returns:
         Rows ordered by path. Empty for a collection with no matches -
@@ -476,7 +476,7 @@ async def list_files(
         .where(col(Document.collection_id) == collection.id, col(Document.active))
     )
     if path_prefix:
-        stmt = stmt.where(col(Document.path).like(f"{path_prefix}%"))
+        stmt = stmt.where(col(Document.path).startswith(path_prefix, autoescape=True))
     stmt = stmt.order_by(col(Document.path))
     rows = await session.execute(stmt)
     return [FileRow(path=p, title=t, modified_at=m, size=s) for p, t, m, s in rows]

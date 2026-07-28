@@ -144,6 +144,23 @@ async def test_multi_get_mixed_comma_and_glob_matches_nothing(
     assert results == []
 
 
+async def test_multi_get_bracket_counts_as_glob_in_comma_heuristic(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """Regression: the comma-vs-glob heuristic checked only `*?{`, so a
+    pattern like `a[l]pha.md,beta.md` was misclassified as a comma list
+    even though _matches_pattern honours fnmatch's `[seq]`. It must count
+    as one glob (whose literal comma matches nothing), like `*` does."""
+    await _seed(session, user)
+    results = await multi_get(
+        session, user, "notes/a[l]pha.md,notes/beta.md", line_numbers=False
+    )
+    assert results == []
+    # And without a comma, [seq] works as a plain glob.
+    results = await multi_get(session, user, "notes/[ab]*.md", line_numbers=False)
+    assert {r.display_path for r in results} == {"docs/notes/alpha.md", "docs/notes/beta.md"}
+
+
 async def test_multi_get_skips_oversized_files(session: AsyncSession, user: CurrentUser) -> None:
     collection_id = await _seed(session, user)
     big_body = "x" * (DEFAULT_MULTI_GET_MAX_BYTES + 1)
@@ -180,6 +197,21 @@ async def test_list_files_under_path_prefix(session: AsyncSession, user: Current
     await _seed(session, user)
     files = await list_files(session, user, "docs", "notes")
     assert {f.path for f in files} == {"notes/alpha.md", "notes/beta.md"}
+
+
+async def test_list_files_prefix_is_literal_not_a_like_pattern(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """Regression: the prefix was interpolated into LIKE unescaped, so
+    `_`/`%` acted as wildcards - `ls docs/s_c` listed all of `src/`."""
+    collection_id = await _seed(session, user)
+    for digest, path in (("e5e5e5e5e5", "s_c/one.md"), ("f6f6f6f6f6", "src/two.md")):
+        await insert_content(session, digest, f"body of {path}")
+        await insert_document(session, collection_id, path, path, digest, utcnow(), utcnow())
+    await session.commit()
+
+    files = await list_files(session, user, "docs", "s_c")
+    assert {f.path for f in files} == {"s_c/one.md"}
 
 
 async def test_get_status_reports_doc_counts(session: AsyncSession, user: CurrentUser) -> None:
