@@ -323,6 +323,30 @@ async def test_rest_query_ignores_json_booleans_in_integer_params(mcp_env: str) 
     assert len(response.json()["results"]) == 2
 
 
+async def test_rest_query_clamps_a_negative_limit(mcp_env: str) -> None:
+    """A negative limit passed the `_is_int` fence and reached
+    `results[:limit]` as `results[:-1]`, silently dropping results off the
+    *end* - the caller asked for fewer and got "all but the last". Clamped
+    to zero, so a nonsensical limit yields nothing rather than a
+    plausible-looking truncation."""
+    await _seed_documents()
+    server = await create_mcp_server(http=True)
+    transport = httpx.ASGITransport(app=server.streamable_http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/query",
+            json={
+                "searches": [{"type": "lex", "query": "unique"}],
+                "limit": -1,
+                "rerank": False,
+            },
+        )
+
+    assert response.status_code == 200
+    # Both seeded documents match; results[:-1] would have returned one.
+    assert response.json()["results"] == []
+
+
 async def test_rest_query_rejects_malformed_searches_with_400(mcp_env: str) -> None:
     """Regression: a non-dict `searches` entry (AttributeError) or an
     invalid `type` value (pydantic ValidationError) used to escape the

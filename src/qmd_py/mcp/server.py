@@ -259,6 +259,11 @@ async def _run_query_search(
     TCP/TLS setup and pool warmup instead of reusing keep-alive
     connections (`httpx.AsyncClient` is concurrency-safe, which the
     gathered /tokenize fan-out already relies on)."""
+    # A negative limit would reach `results[:limit]` as `results[:-5]` and
+    # silently drop results off the *end* instead of returning few - odd
+    # output rather than an error, from either entry point (the `query`
+    # tool's int field and the REST `_is_int` fence both accept negatives).
+    limit = max(0, limit)
     settings = get_settings()
     async with get_session() as session:
         user = await get_current_user(session)

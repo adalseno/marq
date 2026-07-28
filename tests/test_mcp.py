@@ -11,9 +11,14 @@ below stay unit-tested here because they're worth pinning directly,
 without a client session in the way.
 """
 
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import qmd_py.cli.commands.mcp as mcp_cmd
 from qmd_py.auth import CurrentUser
 from qmd_py.cli.commands.mcp import _warn_if_public_bind
 from qmd_py.mcp.server import (
@@ -63,6 +68,30 @@ def test_warn_if_public_bind_warns_for_non_loopback(
     err = capsys.readouterr().err
     assert "Warning" in err
     assert "NO authentication" in err.replace("\n", " ")
+
+
+def test_start_daemon_keeps_the_previous_stdio_log_as_a_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The stdio file is truncated at each start to keep it from growing
+    without bound, which wiped a crashed daemon's traceback at the exact
+    moment the user retried the start to read it. One backup preserves
+    that evidence while still bounding growth at two files."""
+    stdio = tmp_path / "mcp-stdio.log"
+    backup = tmp_path / "mcp-stdio.log.1"
+    stdio.write_text("Traceback (most recent call last): boom")
+    monkeypatch.setattr(mcp_cmd, "_STATE_DIR", tmp_path)
+    monkeypatch.setattr(mcp_cmd, "_PID_FILE", tmp_path / "mcp.pid")
+    monkeypatch.setattr(mcp_cmd, "_STDIO_FILE", stdio)
+    monkeypatch.setattr(mcp_cmd, "_STDIO_BACKUP", backup)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: SimpleNamespace(pid=4242))
+
+    mcp_cmd._start_daemon("127.0.0.1", 8181)
+
+    assert backup.read_text() == "Traceback (most recent call last): boom"
+    assert stdio.read_text() == ""
+    assert (tmp_path / "mcp.pid").read_text() == "4242"
+    assert "pid 4242" in capsys.readouterr().out
 
 
 def test_round2_rounds_to_two_decimals() -> None:

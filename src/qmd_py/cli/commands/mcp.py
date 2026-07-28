@@ -27,6 +27,13 @@ startup, a library printing to stderr) still has to land somewhere, so
 Popen's stdout/stderr go here. Truncated at each daemon start rather
 than appended, which is what made the old file grow without bound."""
 
+_STDIO_BACKUP = _STATE_DIR / "mcp-stdio.log.1"
+"""The previous run's stdio, kept across exactly one start. Truncating in
+place wiped a crashed daemon's traceback at the very moment the user
+retried the start to read it; one backup preserves that evidence while
+still bounding growth at two files, the same shape as the rotating
+handler on `_LOG_FILE`."""
+
 
 def _process_alive(pid: int) -> bool:
     try:
@@ -85,6 +92,8 @@ def _start_daemon(host: str, port: int) -> None:
         "MARQ_LOG_FILE": str(settings.log_file or _LOG_FILE),
         "MARQ_LOG_LEVEL": daemon_level,
     }
+    if _STDIO_FILE.exists():
+        _STDIO_FILE.replace(_STDIO_BACKUP)
     with _STDIO_FILE.open("wb") as stdio_log:
         proc = subprocess.Popen(
             [

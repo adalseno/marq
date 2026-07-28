@@ -636,6 +636,10 @@ async def _hybrid_query_impl(
             type(exc).__name__,
             exc,
         )
+        # "yes" was set optimistically before the attempt; correct it so
+        # the INFO timing line agrees with the WARNING above instead of
+        # claiming a rerank that did not happen.
+        timing["reranked"] = "failed"
         return _rrf_only_results()
 
     blended = []

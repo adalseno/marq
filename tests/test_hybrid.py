@@ -348,7 +348,7 @@ async def test_hybrid_query_rerank_fallback_logs_a_warning(
             return _embeddings_response(request)
         return httpx.Response(200, json=_chat_completion({"lex": "priority", "vec": "priority"}))
 
-    with caplog.at_level(logging.WARNING, logger="qmd_py.search.hybrid"):
+    with caplog.at_level(logging.INFO, logger="qmd_py.search.hybrid"):
         async with LlmClient("http://router.invalid", transport=httpx.MockTransport(handler)) as c:
             await hybrid_query(
                 session, user, "priority levels", c, _MODELS,
@@ -357,6 +357,11 @@ async def test_hybrid_query_rerank_fallback_logs_a_warning(
 
     assert "rerank failed" in caplog.text
     assert "falling back to RRF ordering" in caplog.text
+    # The timing line is set optimistically to reranked=yes before the
+    # attempt; on failure it must not keep claiming a rerank happened, or
+    # the INFO story contradicts the WARNING right above it.
+    timing = next(m for m in (r.getMessage() for r in caplog.records) if m.startswith("query:"))
+    assert "reranked=failed" in timing
 
 
 @pytest.mark.integration
