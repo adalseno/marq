@@ -62,6 +62,22 @@ def test_apostrophe_is_kept_in_term() -> None:
     assert build_ts_query("project's") == "project's:*"
 
 
+def test_interior_apostrophe_is_kept() -> None:
+    assert build_ts_query("don't") == "don't:*"
+
+
+def test_leading_apostrophe_is_stripped() -> None:
+    """Regression: `'` is tsquery's lexeme-quote character, so a term
+    starting with one (`'n:*`) is a tsquery syntax error - Postgres raised
+    a raw ProgrammingError on `rock 'n roll` before the strip."""
+    assert build_ts_query("rock 'n roll") == "rock:* & n:* & roll:*"
+
+
+def test_all_apostrophe_terms_are_dropped() -> None:
+    assert build_ts_query("'") is None
+    assert build_ts_query("'' sports") == "sports:*"
+
+
 def test_empty_quoted_phrase_is_dropped() -> None:
     assert build_ts_query('""') is None
     assert build_ts_query('"" sports') == "sports:*"
@@ -188,6 +204,25 @@ async def test_search_fts_returns_empty_for_an_unparseable_query(
     await session.commit()
 
     assert await search_fts(session, user, "-searchable") == []
+
+
+@pytest.mark.integration
+async def test_search_fts_survives_leading_apostrophe_terms(
+    session: AsyncSession, user: CurrentUser
+) -> None:
+    """Regression: `rock 'n roll` used to reach Postgres as
+    `rock:* & 'n:* & roll:*` - a tsquery syntax error (`'` opens a quoted
+    lexeme) surfacing as an unhandled ProgrammingError."""
+    collection = await add_collection(session, user, "apos", "/tmp/apos")
+    await insert_content(session, "hashapos", "a history of rock n roll music")
+    await insert_document(
+        session, collection.id, "rock.md", "Rock", "hashapos", utcnow(), utcnow()
+    )
+    await session.commit()
+
+    results = await search_fts(session, user, "rock 'n roll")
+    assert [r.display_path for r in results] == ["apos/rock.md"]
+    assert await search_fts(session, user, "'") == []
 
 
 @pytest.mark.integration

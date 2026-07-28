@@ -75,13 +75,18 @@ def sanitize_fts_term(term: str) -> str:
     Keeps letters, digits, apostrophes and underscores; drops everything
     else and lowercases the rest. That removal is what makes the query
     injection-safe, since the result is interpolated into tsquery syntax
-    rather than bound as a parameter.
+    rather than bound as a parameter. Leading/trailing apostrophes are
+    stripped too: in tsquery input `'` is the lexeme-quote character, so a
+    term starting with one opens a quoted lexeme that never closes
+    (`'n:*` is a syntax error) - and a lexeme can't start or end with an
+    apostrophe anyway. Interior ones (`don't`) are legal and kept.
 
     Returns:
         The sanitized term, possibly empty - callers must drop empties
         rather than emit a bare operator.
     """
-    return "".join(ch for ch in term if ch in ("'", "_") or _is_word_char(ch)).lower()
+    sanitized = "".join(ch for ch in term if ch in ("'", "_") or _is_word_char(ch)).lower()
+    return sanitized.strip("'")
 
 
 def is_hyphenated_token(token: str) -> bool:
