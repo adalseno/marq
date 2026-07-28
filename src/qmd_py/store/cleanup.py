@@ -8,6 +8,7 @@ from sqlmodel import col
 
 from qmd_py.auth import CurrentUser
 from qmd_py.db.models import Content, Document, LlmCache
+from qmd_py.db.result import affected_rows
 from qmd_py.search._acl import resolve_collection_ids
 
 
@@ -30,7 +31,7 @@ async def cleanup_orphaned_content(session: AsyncSession) -> int:
         delete(Content).where(~col(Content.hash).in_(select(col(Document.hash))))
     )
     await session.flush()
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    return affected_rows(result)
 
 
 async def delete_llm_cache(session: AsyncSession) -> int:
@@ -44,7 +45,7 @@ async def delete_llm_cache(session: AsyncSession) -> int:
     """
     result = await session.execute(delete(LlmCache))
     await session.flush()
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    return affected_rows(result)
 
 
 async def delete_inactive_documents(session: AsyncSession, user: CurrentUser) -> int:
@@ -70,4 +71,4 @@ async def delete_inactive_documents(session: AsyncSession, user: CurrentUser) ->
         )
     )
     await session.flush()
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    return affected_rows(result)

@@ -29,6 +29,7 @@ from sqlmodel import col
 
 from qmd_py.auth import CurrentUser
 from qmd_py.db.models import Collection, CollectionContext, CollectionGrant, Document
+from qmd_py.db.result import affected_rows
 from qmd_py.store._common import _resolve_owned_collection, can_read
 from qmd_py.store.cleanup import cleanup_orphaned_content
 
@@ -124,7 +125,7 @@ async def remove_collection(
     await session.flush()
     cleaned = await cleanup_orphaned_content(session)
     return RemoveCollectionResult(
-        deleted_docs=deleted.rowcount or 0,  # type: ignore[attr-defined]
+        deleted_docs=affected_rows(deleted),
         cleaned_hashes=cleaned,
     )
 

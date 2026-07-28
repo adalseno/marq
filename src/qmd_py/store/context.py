@@ -11,6 +11,7 @@ from sqlmodel import col
 
 from qmd_py.auth import CurrentUser
 from qmd_py.db.models import Collection, CollectionContext, Document, User
+from qmd_py.db.result import affected_rows
 from qmd_py.store._common import _resolve_owned_collection
 
 
@@ -142,7 +143,7 @@ async def remove_context(
         )
     )
     await session.flush()
-    return (result.rowcount or 0) > 0  # type: ignore[attr-defined]
+    return affected_rows(result) > 0
 
 
 @dataclass

@@ -19,6 +19,7 @@ from sqlmodel import col, select
 
 from qmd_py.auth import CurrentUser
 from qmd_py.db.models import EmbeddingModel
+from qmd_py.db.result import affected_rows
 from qmd_py.llm.client import LlmClient, format_doc_for_embedding, format_query_for_embedding
 from qmd_py.search._acl import collection_names_by_id, resolve_collection_ids
 from qmd_py.search.fts import SearchResult, get_context_for_path, get_docid
@@ -503,6 +504,6 @@ async def cleanup_orphaned_embeddings(session: AsyncSession) -> int:
                 """
             )
         )
-        total += result.rowcount or 0  # type: ignore[attr-defined]
+        total += affected_rows(result)
     await session.flush()
     return total
