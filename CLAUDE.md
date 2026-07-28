@@ -134,6 +134,15 @@ required; `MARQ_LLM_BASE_URL` can point anywhere OpenAI-endpoint-shaped.
   one process, since pooled connections don't survive their loop.
 - `tests/test_cli_skills.py` needs neither Postgres nor the router, so
   it runs in the default `-m "not integration"` suite.
+- **Property-based tests live only in `tests/test_properties.py`**
+  (hypothesis), over the pure input-heavy helpers (`extract_snippet`,
+  `chunk_document`, `vpath`, `build_ts_query`). `conftest.py` loads a
+  `derandomize=True` profile so a commit always explores the same inputs.
+  They must be **sync**: hypothesis can't run async tests and
+  health-checks function-scoped fixtures, so the one property needing
+  Postgres uses its own autocommitting `psycopg` connection rather than
+  the `session` fixture. Don't extend property testing to Postgres/router
+  behavior generally — live verification is what catches those bugs.
 - **Never skip a live-verification pass on a claim you can't prove from
   pytest alone.** Several real bugs in this project (a Postgres
   `ts_rank` weight-range error, a token-budget overflow against the

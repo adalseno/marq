@@ -3,10 +3,15 @@
 Snapshot of the test suite's coverage of `src/qmd_py`, committed so the
 project's real state is visible without cloning and running anything.
 
-**424 tests, 93% line coverage** — of those, **276 need no infrastructure
+**433 tests, 93% line coverage** — of those, **284 need no infrastructure
 at all** and run in about ten seconds (`uv run pytest -m "not integration"`).
-The remaining 148 are integration tests hitting a real Postgres and a real
+The remaining 149 are integration tests hitting a real Postgres and a real
 LLM router; see [CLAUDE.md](../CLAUDE.md) for the testing conventions.
+
+Nine of those are property-based (`tests/test_properties.py`, hypothesis).
+They barely move the line-coverage numbers below — every function they
+cover was already at or near 100% — because what they add is *input*
+coverage, not reachability.
 
 > [!NOTE]
 > A hand-refreshed snapshot, so it can lag the code. Regenerate the table

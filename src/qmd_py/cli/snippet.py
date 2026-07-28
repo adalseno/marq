@@ -108,7 +108,16 @@ def extract_snippet(
         return extract_snippet(body, query, max_len, None, None, intent)
 
     if len(snippet_text) > max_len:
-        snippet_text = snippet_text[: max_len - 3] + "..."
+        # The ellipsis has to fit inside the budget too. At max_len <= 3
+        # there is no room for it: `snippet_text[: max_len - 3]` slices
+        # from the *end* (negative index) and then appends three more
+        # characters, returning something longer than the caller asked
+        # for. Unreachable from marq itself - every call site passes 300
+        # or 500 - but the property test asserts the bound for any
+        # max_len, so the function honours it for any max_len.
+        snippet_text = (
+            snippet_text[: max_len - 3] + "..." if max_len > 3 else snippet_text[:max_len]
+        )
 
     absolute_start = line_offset + start + 1  # 1-indexed
     snippet_line_count = len(snippet_lines_list)

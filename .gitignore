@@ -12,3 +12,4 @@ build/
 *.egg-info/
 llm-stack/models/*.gguf
 site/
+.hypothesis/

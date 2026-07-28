@@ -17,6 +17,7 @@ from urllib.parse import quote
 import pytest
 import pytest_asyncio
 from click.testing import CliRunner, Result
+from hypothesis import settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -42,6 +43,18 @@ from qmd_py.store import (
 
 FIXTURE_COLLECTION_PATH = Path(__file__).parent / "fixtures" / "sample-collection"
 FIXTURE_COLLECTION_EXTS = {".md", ".py", ".js", ".ts"}
+
+# Property-based tests (test_properties.py) run derandomized: hypothesis
+# derives its examples from a hash of the test instead of a random seed,
+# so a given commit always explores the same inputs. The rest of this
+# suite is deterministic, and a property test that fails only on some runs
+# would turn an unrelated change red for reasons the author can't
+# reproduce. The cost is that new counterexamples surface when the code or
+# the strategy changes, not spontaneously over time - which is the trade
+# this project wants. `.hypothesis/` is therefore build output, not state
+# worth committing.
+settings.register_profile("qmd", derandomize=True, max_examples=200)
+settings.load_profile("qmd")
 
 
 def _schema_url(schema: str) -> str:

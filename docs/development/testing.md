@@ -36,6 +36,38 @@ neither is reachable — most of the pure/logic-only modules (formatter,
 scoring, vpath, skill discovery) have non-integration unit tests that
 don't need either.
 
+**Property-based tests live in `tests/test_properties.py`** (hypothesis),
+and stay deliberately confined to it. They cover the pure, input-heavy
+helpers — `extract_snippet`, `chunk_document`, `vpath`, and the
+`build_ts_query` lex parser — where an invariant can actually be stated.
+Every one of those was already at or near 100% line coverage; what a
+property adds is *input* coverage, which is a different thing. The first
+one written found a latent bound violation in `extract_snippet` that full
+line coverage had never reached.
+
+Two rules keep them cheap:
+
+- **Derandomized.** `conftest.py` loads a `derandomize=True` profile, so a
+  given commit always explores the same inputs. The rest of the suite is
+  deterministic, and a property test that fails only on some runs would
+  turn an unrelated change red for reasons its author can't reproduce.
+  New counterexamples therefore appear when the code or the strategy
+  changes — not spontaneously. `.hypothesis/` is build output and stays
+  gitignored.
+- **Sync, and off the async fixtures.** Hypothesis can't drive an async
+  test (it raises `InvalidArgument`), and it health-checks function-scoped
+  fixtures, which aren't reset between generated examples. The one
+  property that needs Postgres — "whatever `build_ts_query` emits,
+  `to_tsquery` accepts" — uses its own sync, autocommitting connection
+  instead of the `session` fixture. Autocommit matters: a rejected
+  tsquery aborts its transaction, so on a shared session every later
+  example would fail with "current transaction is aborted" rather than
+  its own verdict, and hypothesis would shrink toward the wrong input.
+
+Do **not** reach for hypothesis against Postgres or the router generally.
+That's where this project's real bugs have lived, and live verification —
+not generated input — is what has actually found them.
+
 **`tests/fixtures/sample-collection/`** is a small, frozen, checked-in
 multi-language project (`.md`/`.py`/`.js`/`.ts`, the "Tasknote" example
 used throughout these docs) — a manageable, always-available stand-in
