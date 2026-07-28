@@ -321,6 +321,37 @@ def test_update_continues_past_a_failing_update_command(marq: Marq, tmp_path: Pa
     assert "unique-newer-token" in marq("search", "unique-newer-token").output
 
 
+def test_update_treats_a_hung_update_command_as_a_per_collection_failure(
+    marq: Marq, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for the third review's finding 3: the update command ran
+    with no timeout and an inherited stdin, so a command that hung (a git
+    pull prompting for credentials into the captured stderr) blocked the
+    whole run forever - invisibly, under cron. A timeout must now surface
+    it through the ordinary per-collection failure path."""
+    import qmd_py.cli.commands.write as write_module
+
+    slow = tmp_path / "slow"
+    slow.mkdir()
+    _write_collection(slow)
+    healthy = tmp_path / "healthy"
+    healthy.mkdir()
+    (healthy / "notes").mkdir()
+
+    marq("collection", "add", str(slow), "--name", "a-slow", "--mask", "**/*.md")
+    marq("collection", "add", str(healthy), "--name", "b-healthy", "--mask", "**/*.md")
+    marq("collection", "update-cmd", "a-slow", "sleep", "30")
+
+    monkeypatch.setattr(write_module, "_UPDATE_COMMAND_TIMEOUT", 1)
+    (healthy / "notes" / "prompt.md").write_text("# Prompt\n\nunique-prompt-token\n")
+    result = marq("update")
+
+    assert result.exit_code == 1, result.output
+    assert "timed out" in result.output
+    # The collection after the hung one was still reindexed.
+    assert "unique-prompt-token" in marq("search", "unique-prompt-token").output
+
+
 def test_update_continues_past_a_database_error_in_one_collection(
     marq: Marq, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

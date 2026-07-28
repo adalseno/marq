@@ -241,6 +241,11 @@ async def _collection_set_default_impl(
 # update
 # =============================================================================
 
+_UPDATE_COMMAND_TIMEOUT = 600
+"""Seconds before a collection's update command is killed. Generous - a
+slow git pull over a bad link should survive - but finite, because this
+command invites cron usage where a hang is invisible forever."""
+
 
 @click.command("update")
 def update_command() -> None:
@@ -271,14 +276,30 @@ async def _update_impl(session: AsyncSession, user: CurrentUser) -> None:
 
         if collection.update_command:
             click.echo(f"    Running update command: {collection.update_command}")
-            proc = subprocess.run(  # noqa: S602 - user's own configured command, same trust
-                collection.update_command,
-                shell=True,
-                cwd=collection.path,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            try:
+                proc = subprocess.run(  # noqa: S602 - user's own configured command, same trust
+                    collection.update_command,
+                    shell=True,
+                    cwd=collection.path,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    # stdin closed so a command that decides to prompt (a
+                    # git pull asking for credentials, its prompt swallowed
+                    # into the captured stderr) fails fast instead of
+                    # blocking forever - invisibly, under cron.
+                    stdin=subprocess.DEVNULL,
+                    timeout=_UPDATE_COMMAND_TIMEOUT,
+                )
+            except subprocess.TimeoutExpired:
+                click.echo(
+                    f"✗ Update command timed out after {_UPDATE_COMMAND_TIMEOUT}s", err=True
+                )
+                failures.append(
+                    (row.name, f"update command timed out after {_UPDATE_COMMAND_TIMEOUT}s")
+                )
+                click.echo()
+                continue
             for line in proc.stdout.splitlines():
                 click.echo(f"    {line}")
             for line in proc.stderr.splitlines():
