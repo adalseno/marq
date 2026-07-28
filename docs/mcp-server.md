@@ -55,7 +55,9 @@ are logged only at `DEBUG` — see the privacy note in
 
 If you bind a non-loopback `--host`, the server warns at startup: the
 HTTP transport has no authentication yet, so anyone who can reach the
-port can read every indexed document.
+port can read every indexed document. See
+[Deployment: TLS and authentication](#deployment-tls-and-authentication)
+for what to put in front of it.
 
 ## Tools
 
@@ -126,3 +128,107 @@ serving `mcp.streamable_http_app()` directly (rather than mounting it
 into a separate hand-built FastAPI app) means its lifespan is already
 wired correctly, so there's no manual session-map bookkeeping to get
 wrong.
+
+## Deployment: TLS and authentication
+
+marq serves plain HTTP and has **no built-in TLS** — there is no
+`--ssl`/certificate option, and the MCP SDK's
+`run_streamable_http_async()` takes no TLS parameters. (The SDK's
+`TransportSecuritySettings` sounds relevant but is DNS-rebinding
+protection — `Host`/`Origin` validation — not encryption.) Put a reverse
+proxy in front.
+
+### Why the proxy also has to authenticate
+
+This is the part to not skip, and it follows directly from marq's
+[ACL status](architecture.md): `can_access()` is called at every
+read/write choke point, but **its body is mocked to allow everything**.
+There are therefore two separate gaps, not one:
+
+- **No authentication** — the HTTP transport has no notion of *who* is
+  calling. No bearer token, no client certificate, nothing to identify a
+  caller.
+- **No authorization** — `can_access()` returns "allowed" regardless, so
+  even a known caller would not be restricted.
+
+The second is the one people notice; the first is why fixing only the
+second would not help. A real `can_access()` needs an authenticated
+identity to make a decision *about*, which is why the project plans them
+together — the startup warning's own wording is "until real ACL (and with
+it a bearer-token check) lands".
+
+Until then, **TLS alone buys you an encrypted channel to an
+unauthenticated index**: it stops eavesdropping, not access. So the proxy
+does both jobs. Once real ACL and a token check land, the proxy's auth
+layer becomes belt-and-braces rather than the only thing standing there,
+and can be relaxed to taste.
+
+None of this applies to a single-user machine with marq on loopback,
+which is the default and the shape it is designed for. The warning fires
+precisely when you leave that shape.
+
+### Caddy example
+
+Keep marq on loopback — the default — and let the proxy be the only
+thing listening publicly:
+
+```bash
+marq mcp --http --daemon          # 127.0.0.1:8181
+```
+
+```caddyfile
+marq.example.com {
+    basic_auth {
+        alice $2a$14$...          # caddy hash-password --plaintext 'secret'
+    }
+
+    reverse_proxy host.containers.internal:8181 {
+        flush_interval -1          # do not buffer: GET /mcp can stream SSE
+    }
+}
+```
+
+```yaml
+services:
+  caddy:
+    image: docker.io/library/caddy:2-alpine     # ~50 MB
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data                        # certificates — must persist
+      - caddy_config:/config
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+
+volumes:
+  caddy_data:
+  caddy_config:
+```
+
+Details worth knowing:
+
+- `basic_auth` is the Caddy ≥ 2.8 spelling; earlier versions use
+  `basicauth`. For something richer, `forward_auth` fronts an OAuth2
+  proxy and `client_auth` does mTLS.
+- `flush_interval -1` disables response buffering. `POST /mcp` returns
+  plain JSON (marq runs the transport with `json_response=True`), but the
+  Streamable HTTP spec still allows `GET /mcp` to hold an SSE stream, and
+  a buffering proxy stalls it.
+- Caddy preserves the client's `Host` header by default, unlike nginx —
+  which matters if you ever enable the SDK's DNS-rebinding protection.
+- marq is **not containerised** (there is no Dockerfile), so it runs on
+  the host while Caddy runs in a container; hence the host-gateway hop.
+  Podman 4.7+ resolves `host.containers.internal` by itself, Docker on
+  Linux needs the `extra_hosts` line. Caddy is also a single static
+  binary — running it directly on the host and proxying to
+  `127.0.0.1:8181` sidesteps the whole question.
+- **Certificates**: a public DNS name needs nothing, Caddy provisions and
+  renews via Let's Encrypt automatically — just persist `caddy_data` or
+  you re-issue on every restart and will hit rate limits. An internal
+  hostname (`marq.lan`) can't be validated by ACME: add `tls internal` and
+  Caddy issues from its own local CA, whose root you then install on the
+  clients.
+
+Outbound TLS already works, incidentally: `MARQ_LLM_BASE_URL` is passed
+straight to `httpx`, so an `https://` router endpoint needs no
+configuration.
