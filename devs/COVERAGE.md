@@ -31,8 +31,16 @@ capped at 100 to keep that ratio defensible.
 >
 > For a browsable, line-by-line view locally, add `--cov-report=html` and
 > open `htmlcov/index.html`. That report is a build artifact and stays
-> gitignored — publishing it is a job for CI once the project moves to
-> GitHub Actions/Pages.
+> gitignored.
+>
+> **It stays a local, hand-refreshed snapshot rather than something CI
+> publishes**, which is a change of plan from what this file used to say.
+> CI cannot produce the authoritative number: it runs `-m "not llm"`,
+> since it has no LLM router, and that selection reports **92% / 267
+> missed** against the full suite's **93% / 249**. Publishing the CI
+> figure would put a permanently lower number on the site and read as a
+> regression, so the number here is deliberately the one a full local run
+> produces — with the router — and has to be refreshed by hand.
 
 ## Where the gaps are
 

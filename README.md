@@ -1,8 +1,15 @@
 # marq
 
+[![CI](https://github.com/adalseno/marq/actions/workflows/ci.yml/badge.svg)](https://github.com/adalseno/marq/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-adalseno.github.io%2Fmarq-blue)](https://adalseno.github.io/marq/)
+[![Python](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/)
+[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)](devs/COVERAGE.md)
+
 Centralized markdown/code search over Postgres/pgvector, with a hybrid
 BM25 + vector + LLM-reranking search pipeline over plain HTTP, a CLI, and
 an MCP server for AI agents.
+
+**Documentation: [adalseno.github.io/marq](https://adalseno.github.io/marq/)**
 
 marq is inspired by [qmd](https://github.com/tobi/qmd) but is not a fork
 or a drop-in replacement: it's a from-scratch Python rewrite built around
