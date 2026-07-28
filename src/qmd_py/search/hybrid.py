@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from qmd_py.auth import CurrentUser
 from qmd_py.cli.snippet import extract_intent_terms
 from qmd_py.config import Settings
-from qmd_py.llm.client import LlmClient
+from qmd_py.llm.client import LlmClient, format_query_for_embedding
 from qmd_py.search.fts import search_fts, validate_lex_query, validate_semantic_query
-from qmd_py.search.vector import chunk_document, search_vec
+from qmd_py.search.vector import chunk_document, has_embeddings_table, search_vec
 
 # Ported constants (src/store.ts) - a strong BM25 signal skips the
 # (comparatively expensive) query-expansion LLM call entirely.
@@ -482,13 +482,28 @@ async def hybrid_query(
     vec_queries: list[tuple[str, str]] = [] if preexpanded is not None else [("original", query)]
     vec_queries.extend((q.type, q.query) for q in expanded if q.type in ("vec", "hyde"))
 
-    for query_type, text in vec_queries:
-        vec_results = await search_vec(
-            session, user, text, llm_client, embed_model, limit=20, collection_name=collection_name
-        )
-        if vec_results:
-            ranked_lists.append(_remember(vec_results))
-            query_types.append(query_type)
+    # All vec/hyde variants are embedded in one /v1/embeddings request
+    # (LlmClient.embed already takes a batch) instead of one round trip
+    # per sub-query inside search_vec. The table check keeps the
+    # nothing-embedded-yet case at zero embedding calls, exactly as
+    # search_vec alone behaves.
+    if vec_queries and await has_embeddings_table(session, embed_model):
+        formatted = [format_query_for_embedding(q, embed_model) for _, q in vec_queries]
+        query_vectors = await llm_client.embed(formatted, embed_model)
+        for (query_type, text), vector in zip(vec_queries, query_vectors, strict=True):
+            vec_results = await search_vec(
+                session,
+                user,
+                text,
+                llm_client,
+                embed_model,
+                limit=20,
+                collection_name=collection_name,
+                query_embedding=vector,
+            )
+            if vec_results:
+                ranked_lists.append(_remember(vec_results))
+                query_types.append(query_type)
 
     weights = _hybrid_rrf_weights(query_types)
     fused = reciprocal_rank_fusion(ranked_lists, weights)

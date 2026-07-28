@@ -211,6 +211,18 @@ def _chat_completion(payload: dict[str, str]) -> dict[str, object]:
     return {"choices": [{"message": {"content": json.dumps(payload)}}]}
 
 
+def _embeddings_response(request: httpx.Request) -> httpx.Response:
+    """A /v1/embeddings body with one vector per input, as a real router
+    returns. hybrid_query embeds all its vec/hyde variants in one batched
+    request, so a mock returning a fixed single vector would not match the
+    request it was given."""
+    inputs = json.loads(request.content)["input"]
+    return httpx.Response(
+        200,
+        json={"data": [{"index": i, "embedding": [0.1] * EMBED_DIM} for i in range(len(inputs))]},
+    )
+
+
 def _mock_llm_client(payload: object) -> LlmClient:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=payload)
@@ -284,7 +296,7 @@ async def test_hybrid_query_falls_back_to_rrf_when_rerank_fails(
         if request.url.path == "/tokenize":
             return httpx.Response(200, json={"tokens": [1, 2, 3]})
         if request.url.path == "/v1/embeddings":
-            return httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1] * 1024}]})
+            return _embeddings_response(request)
         return httpx.Response(200, json=_chat_completion({"lex": "priority", "vec": "priority"}))
 
     async with LlmClient("http://router.invalid", transport=httpx.MockTransport(handler)) as c:
@@ -307,7 +319,7 @@ async def test_hybrid_query_rerank_fallback_still_honours_min_score(
         if request.url.path in ("/rerank", "/tokenize"):
             return httpx.Response(503, json={})
         if request.url.path == "/v1/embeddings":
-            return httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1] * 1024}]})
+            return _embeddings_response(request)
         return httpx.Response(200, json=_chat_completion({"lex": "priority", "vec": "priority"}))
 
     async with LlmClient("http://router.invalid", transport=httpx.MockTransport(handler)) as c:
@@ -393,6 +405,40 @@ async def test_hybrid_query_no_rerank_uses_rrf_position_score(
     assert results[0].score == pytest.approx(1.0)
     scores = [r.score for r in results]
     assert scores == sorted(scores, reverse=True)
+
+
+@pytest.mark.integration
+async def test_hybrid_query_embeds_every_vec_variant_in_one_request(
+    session: AsyncSession, user: CurrentUser, llm_client: LlmClient, sample_collection: Collection
+) -> None:
+    """All vec/hyde sub-queries share a single /v1/embeddings call rather
+    than paying one round trip each. Postgres is real (the embeddings
+    table must exist for the batch to be issued at all); the router is a
+    MockTransport that counts embedding requests and their batch sizes."""
+    await embed_pending_documents(session, user, llm_client, EMBED_MODEL, EMBED_DIM)
+    await session.commit()
+
+    batch_sizes: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/embeddings":
+            batch_sizes.append(len(json.loads(request.content)["input"]))
+            return _embeddings_response(request)
+        if request.url.path == "/tokenize":
+            return httpx.Response(200, json={"tokens": [1, 2, 3]})
+        return httpx.Response(
+            200, json=_chat_completion({"lex": "priority", "vec": "levels", "hyde": "a document"})
+        )
+
+    async with LlmClient("http://router.invalid", transport=httpx.MockTransport(handler)) as c:
+        await hybrid_query(
+            session, user, "priority levels", c, _MODELS,
+            QueryOptions(collection_name="sample", skip_rerank=True),
+        )
+
+    # One request holding the original query plus the vec and hyde
+    # variants - not three separate calls.
+    assert batch_sizes == [3]
 
 
 @pytest.mark.integration

@@ -90,6 +90,14 @@ async def _embeddings_table_exists(session: AsyncSession, table_name: str) -> bo
     return result.scalar_one() is not None
 
 
+async def has_embeddings_table(session: AsyncSession, model_slug: str) -> bool:
+    """Whether anything has ever been embedded with this model - i.e. its
+    `embeddings_<slug>` table exists. Lets a caller batching query
+    embeddings up front (see `hybrid.hybrid_query`) skip the embedding
+    round trip entirely when vector search would return empty anyway."""
+    return await _embeddings_table_exists(session, embeddings_table_name(model_slug))
+
+
 async def _pgvector_schema(session: AsyncSession) -> str:
     """Schema pgvector's `vector` type/opclasses actually live in - looked
     up from `pg_extension` rather than assumed to be the app's own
@@ -211,10 +219,18 @@ async def embed_pending_documents(
 ) -> EmbedResult:
     """Embed every active document not yet present in `embeddings_<slug>`.
 
-    MVP: no batching/retry/duration-cap/force-re-embed - see Phase 7's
-    `embed` CLI command for the production version of this.
+    Commits after each document rather than leaving one giant transaction
+    to the caller: the pending query (`hash NOT IN (...)`) makes the run
+    naturally resumable, so a crash midway through a large embed keeps
+    everything already written, and the transaction stays short on the
+    shared server. No retry/duration-cap/force-re-embed yet.
     """
     await ensure_embedding_model(session, model_slug, "embed", dimension)
+    # Committed before the pending scan, not left to the caller: the model
+    # row and its table (DDL is transactional in Postgres) must survive
+    # even when this run embeds nothing, since the per-document commits
+    # below are the only other commit points.
+    await session.commit()
     table_name = embeddings_table_name(model_slug)
 
     collection_ids = await resolve_collection_ids(session, user, collection_name)
@@ -236,6 +252,17 @@ async def embed_pending_documents(
         )
     ).all()
 
+    pgvector_schema = await _pgvector_schema(session)
+    insert_stmt = text(
+        f"""
+        INSERT INTO {table_name} (hash, seq, pos, total_chunks, embedding)
+        VALUES (:hash, :seq, :pos, :total_chunks, (:vec)::{pgvector_schema}.vector)
+        ON CONFLICT (hash, seq) DO UPDATE SET
+            pos = excluded.pos, total_chunks = excluded.total_chunks,
+            embedding = excluded.embedding, embedded_at = now()
+        """
+    )
+
     docs_processed = 0
     chunks_embedded = 0
     for row in pending:
@@ -246,27 +273,22 @@ async def embed_pending_documents(
         ]
         vectors = await llm_client.embed(texts_to_embed, model_slug)
 
-        pgvector_schema = await _pgvector_schema(session)
-        for seq, ((_, pos), vector) in enumerate(zip(chunks, vectors, strict=True)):
-            await session.execute(
-                text(
-                    f"""
-                    INSERT INTO {table_name} (hash, seq, pos, total_chunks, embedding)
-                    VALUES (:hash, :seq, :pos, :total_chunks, (:vec)::{pgvector_schema}.vector)
-                    ON CONFLICT (hash, seq) DO UPDATE SET
-                        pos = excluded.pos, total_chunks = excluded.total_chunks,
-                        embedding = excluded.embedding, embedded_at = now()
-                    """
-                ),
+        # One executemany per document instead of one INSERT per chunk.
+        await session.execute(
+            insert_stmt,
+            [
                 {
                     "hash": row.hash,
                     "seq": seq,
                     "pos": pos,
                     "total_chunks": len(chunks),
                     "vec": _to_vector_literal(vector),
-                },
-            )
-            chunks_embedded += 1
+                }
+                for seq, ((_, pos), vector) in enumerate(zip(chunks, vectors, strict=True))
+            ],
+        )
+        await session.commit()
+        chunks_embedded += len(chunks)
         docs_processed += 1
 
     return EmbedResult(docs_processed, chunks_embedded)
@@ -338,6 +360,7 @@ async def search_vec(
     model_slug: str,
     limit: int = 20,
     collection_name: str | None = None,
+    query_embedding: list[float] | None = None,
 ) -> list[SearchResult]:
     """Rank documents by embedding similarity to the query.
 
@@ -352,6 +375,11 @@ async def search_vec(
             are retrieved first, since several may belong to one document.
         collection_name: Restrict to one collection; None searches every
             collection the user can read.
+        query_embedding: Precomputed vector for `query`, skipping the
+            embedding round trip. Must have been produced from
+            `format_query_for_embedding(query, model_slug)` with the same
+            model - `hybrid_query` uses this to embed all its vec/hyde
+            variants in one batched request.
 
     Returns:
         Hits ordered by descending similarity, `source="vec"` and
@@ -360,10 +388,10 @@ async def search_vec(
         or when the index holds no neighbours.
 
     Note:
-        Makes one embedding call to the LLM router per invocation. The
-        collection filter is applied outside the nearest-neighbour CTE,
-        because `ORDER BY distance LIMIT n` is the only access pattern
-        the ANN index can serve.
+        Makes one embedding call to the LLM router per invocation, unless
+        `query_embedding` is supplied. The collection filter is applied
+        outside the nearest-neighbour CTE, because `ORDER BY distance
+        LIMIT n` is the only access pattern the ANN index can serve.
     """
     collection_ids = await resolve_collection_ids(session, user, collection_name)
     if not collection_ids:
@@ -377,8 +405,9 @@ async def search_vec(
         return []
 
     pgvector_schema = await _pgvector_schema(session)
-    formatted_query = format_query_for_embedding(query, model_slug)
-    embedding = (await llm_client.embed([formatted_query], model_slug))[0]
+    if query_embedding is None:
+        formatted_query = format_query_for_embedding(query, model_slug)
+        query_embedding = (await llm_client.embed([formatted_query], model_slug))[0]
 
     rows = (
         await session.execute(
@@ -403,7 +432,7 @@ async def search_vec(
                 """
             ),
             {
-                "vec": _to_vector_literal(embedding),
+                "vec": _to_vector_literal(query_embedding),
                 # limit*3 candidate pool mirrors the TS reference - the
                 # only access pattern that uses the HNSW index.
                 "candidate_limit": limit * 3,
